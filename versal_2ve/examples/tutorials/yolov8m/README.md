@@ -19,7 +19,7 @@ for ONNX Runtime, ensuring robust and seamless operation on the VEK385 evaluatio
 
 This tutorial requires:
 
-* Vitis AI 6.2 Docker for Versal AI Edge Series Gen 2:
+* Latest Vitis AI Docker for Versal AI Edge Series Gen 2:
     * Instructions for installation and startup are in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 * VEK385 evaluation kit (see above):
     * Setup instructions are available in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
@@ -52,27 +52,9 @@ Before starting Docker, adjust the access permissions of the working directories
 chmod -R a+w <path/to/yolov8m>
 ```
 
-Load the docker image: 
+Load the latest docker image and launch it as explained in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 
-```
-docker load -i <docker_image_file>.tgz
-```
 
-Run `docker images` to verify docker REPOSITORY, IMAGEID and TAG information. 
-
-|REPOSITORY          | TAG               | IMAGE ID    | CREATED       | SIZE   |
-|--------------------|-------------------|-------------|---------------|--------|
-|vitis_ai_2ve_docker |   release_v6.2    |   ??????    |  xx hours ago | 39.1GB |
-
-Start the docker: 
-
-```
-docker run -it --network host \  
-  -v /path/to/your/license:/usr/licenses \  
-  -v $PWD/yolov8m:/yolov8m \  
-  --rm vitis_ai_2ve_docker:release_v6.2
-   "bash"
-```
 ### Install Required Python Packages
 
 Inside the docker, install the required python packages:
