@@ -1,10 +1,3 @@
-<table class="sphinxhide" width="100%">
- <tr width="100%">
-    <td align="center"><img src="https://raw.githubusercontent.com/Xilinx/Image-Collateral/main/xilinx-logo.png" width="30%"/><h1>Vitis AI Development</h1>
-    </td>
- </tr>
-</table>
-
 # Getting Started with Vitis AI: ResNet-18 End-to-End Flow
 
 ## Introduction
