@@ -17,7 +17,7 @@ This tutorial shows how to compile an ONNX model with the Vitis AI flow and depl
 
 To build the example and deploy it on board, the following software and hardware are required:
 
-* Vitis AI 6.2 Docker for Versal AI Edge Series Gen 2:
+* Latest Vitis AI Docker for Versal AI Edge Series Gen 2:
     * Instructions for installation and startup are in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 * VEK385 evaluation kit:
     * Setup instructions are available in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
@@ -41,20 +41,9 @@ Load the docker image:
 docker load -i <docker_image_file>.tgz
 ```
 
-Run `docker images` to verify docker REPOSITORY, IMAGEID and TAG information. 
+Load the latest docker image and launch it as explained in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 
-|REPOSITORY          | TAG               | IMAGE ID    | CREATED       | SIZE   |
-|--------------------|-------------------|-------------|---------------|--------|
-|vitis_ai_2ve_docker | release_v6.2 |  ???????    |  xx hours ago | 39.1GB |
 
-Start the docker: 
-
-```
-docker run -it --network host \  
-  -v /path/to/your/license:/usr/licenses \  
-  -v $PWD/resnet18_bf16:/resnet18_bf16 \  
-  --rm vitis_ai_2ve_docker:release_v6.2  "bash"
-```
 ## Vitis AI Compilation & Deployment Flow
 
 1. Inside the docker, change directory to the tutorial folder, install python packages required by the example, and export the ResNet-18 ONNX model:
