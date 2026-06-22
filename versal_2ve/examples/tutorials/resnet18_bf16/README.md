@@ -1,4 +1,9 @@
-# Getting Started with Vitis AI: ResNet-18 End-to-End Flow
+<table class="sphinxhide" width="100%">
+ <tr width="100%">
+    <td align="center"><img src="https://raw.githubusercontent.com/Xilinx/Image-Collateral/main/xilinx-logo.png" width="30%"/><h1> Getting Started with Vitis AI: ResNet-18 End-to-End Flow</h1>
+    </td>
+ </tr>
+</table>
 
 ## Introduction
 
@@ -28,25 +33,13 @@ Before starting Docker, get the tutorial repository and adjust the access permis
 chmod -R a+w <path/to/resnet18_bf16>
 ```
 
-Pull the Docker image on a system with Docker installed:
-
-```
-docker pull amdih/vitis-ai:versal-2ve-release_v6.2_0612
-```
-
-Run `docker images` to verify docker REPOSITORY, IMAGEID and TAG information. 
-
-|REPOSITORY          | TAG                          | IMAGE ID    | CREATED       | SIZE   |
-|--------------------|------------------------------|-------------|---------------|--------|
-|amdih/vitis-ai      | versal-2ve-release_v6.2_0612 |   ??????    |  xx hours ago | xx.xGB |
-
-Star the docker: 
+Refer to Vitis AI User Guide for Versal AI Edge Series Gen 2 to load and start docker:
 
 ```
 docker run -it --network host \  
   -v /path/to/your/license:/usr/licenses \  
-  -v $PWD/resnet50_quark:/resnet50_quark \  
-  --rm amdih/vitis-ai:versal-2ve-release_v6.2_0612  "bash"
+  -v /<host_path>:/<path_in_docker> \  
+  --rm <REPOSITORY>:<TAG>  "bash"
 ```
 
 ## Vitis AI Compilation & Deployment Flow
