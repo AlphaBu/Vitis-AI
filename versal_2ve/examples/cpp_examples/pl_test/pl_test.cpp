@@ -118,14 +118,29 @@ int main(int argc, char* argv[]) {
       static_cast<uint8_t>(arg_info_list[1].mem_index) /* output arg 1 */,
       device));
 
-  // Fill the input buffer with a known ramp: in[i] = i + 4.
+  const int num_words = TRANSFER_SIZE_BYTES / 4;
+
+  // Fill the input buffer with a known ramp: in[i] = i + 4. This is the
+  // reference data; for an identity (pass_through) kernel the output must
+  // match this ramp word-for-word.
   uint32_t* pl_in_memory = const_cast<uint32_t*>(
       reinterpret_cast<const uint32_t*>(
           pl_in_memory_vec[0]->map(vart::DataMapFlags::WRITE)));
-  for (int i = 0; i < TRANSFER_SIZE_BYTES / 4; i++) {
-    pl_in_memory[i] = i + 4;
+  for (int i = 0; i < num_words; i++) {
+    pl_in_memory[i] = static_cast<uint32_t>(i + 4);
   }
   pl_in_memory_vec[0]->unmap();
+
+  // Pre-fill the output buffer with a sentinel value distinct from any
+  // expected output word, so a kernel that writes nothing is detected as a
+  // mismatch rather than accidentally passing.
+  uint32_t* pl_out_init = const_cast<uint32_t*>(
+      reinterpret_cast<const uint32_t*>(
+          pl_out_memory_vec[0]->map(vart::DataMapFlags::WRITE)));
+  for (int i = 0; i < num_words; i++) {
+    pl_out_init[i] = 0xDEADBEEFu;
+  }
+  pl_out_memory_vec[0]->unmap();
 
   void* mem_in = (void*)(uintptr_t)(pl_in_memory_vec[0]->get_physical_addr());
   void* mem_out = (void*)(uintptr_t)(pl_out_memory_vec[0]->get_physical_addr());
@@ -134,16 +149,41 @@ int main(int argc, char* argv[]) {
   plkernel->process(mem_in, mem_out, size);
   plkernel->wait(1000);
 
-  // Read back and print the first few output words. For an identity kernel the
-  // expected values are 4, 5, 6, ... (matching the input ramp).
+  // Read back the output and verify it against the reference ramp. For an
+  // identity (pass_through) kernel every output word must equal its input
+  // word, i.e. out[i] == i + 4.
   uint32_t* mapped_memory_out = const_cast<uint32_t*>(
       reinterpret_cast<const uint32_t*>(
           pl_out_memory_vec[0]->map(vart::DataMapFlags::READ)));
-  for (int i = 0; i < 10; i++) {
+
+  // Print the first few output words for a quick visual sanity check.
+  for (int i = 0; i < 10 && i < num_words; i++) {
     std::cout << "out[" << i << "] = " << mapped_memory_out[i] << std::endl;
+  }
+
+  // Full correctness check over all words.
+  size_t mismatches = 0;
+  for (int i = 0; i < num_words; i++) {
+    uint32_t expected = static_cast<uint32_t>(i + 4);
+    if (mapped_memory_out[i] != expected) {
+      if (mismatches < 10) {  // Report only the first few mismatches.
+        std::cout << "MISMATCH at [" << i << "]: expected " << expected
+                  << ", got " << mapped_memory_out[i] << std::endl;
+      }
+      ++mismatches;
+    }
   }
   pl_out_memory_vec[0]->unmap();
 
   delete plkernel;
-  return 0;
+
+  if (mismatches == 0) {
+    std::cout << "PASS: all " << num_words
+              << " output words match the input ramp." << std::endl;
+    return 0;
+  }
+
+  std::cout << "FAIL: " << mismatches << " of " << num_words
+            << " output words did not match." << std::endl;
+  return 1;
 }
