@@ -42,7 +42,12 @@ VITIS_KERNELS_CONFIG_PATH = $(ABS_PATH)/vitis_kernels_config/
 IMAGE_PROCESSING_XO = $(ABS_PATH)/vitis_kernels_config/image_processing/image_processing.xo
 IMAGE_PROCESSING_CFG = $(ABS_PATH)/vitis_kernels_config/image_processing/image_processing.cfg
 
-XOS = $(IMAGE_PROCESSING_XO)
+# pass_through PL kernel (built via its own Makefile in ../pass_through)
+PASS_THROUGH_PATH = $(ABS_PATH)/../pass_through
+PASS_THROUGH_XO   = $(PASS_THROUGH_PATH)/build/pass_through.xo
+PASS_THROUGH_SRCS = $(PASS_THROUGH_PATH)/pass_through.cpp $(PASS_THROUGH_PATH)/hls_config.cfg
+
+XOS = $(IMAGE_PROCESSING_XO) $(PASS_THROUGH_XO)
 CFGS = $(IMAGE_PROCESSING_CFG)
 
 IMAGE_PROCESSING_SRCS= ${VITIS_KERNELS_PATH}/image_processing/src/image_processing.cpp\
@@ -72,18 +77,22 @@ $(IMAGE_PROCESSING_XO): $(IMAGE_PROCESSING_SRCS) | $(IMAGE_PROCESSING_CFG)
 $(IMAGE_PROCESSING_CFG): ${VITIS_KERNELS_CONFIG_PATH}/image_processing/image_processing_config.h
 	bash ${VITIS_KERNELS_PATH}/image_processing/create_imgproc_config.sh $^
 	mv image_processing.cfg $@
-	
+
+$(PASS_THROUGH_XO): $(PASS_THROUGH_SRCS)
+	@echo "Building pass_through.xo"
+	$(MAKE) -C $(PASS_THROUGH_PATH) compile TARGET=$(TARGET) PLATFORM=$(PLATFORM)
+
 
 #- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 #Link Image preprocessing PL kernel and AIE graph with Platform
 link: $(LINK_OUTPUT)
 
-$(LINK_OUTPUT):
+$(LINK_OUTPUT): $(IMAGE_PROCESSING_XO) $(PASS_THROUGH_XO)
 	@echo "INFO:- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
 	cd $(ABS_PATH); gmio_train -s --part xc2ve3858-ssva2112-2MP-e-S -o training-libadf.a
 	cd $(ABS_PATH)/link; v++ $(XCXX_COMMON_OPTS) --platform $(PLATFORM) \
 	--config $(ABS_PATH)/link/system.cfg \
-    -l $(ABS_PATH)/training-libadf.a $(IMAGE_PROCESSING_XO) -o ${PROJECT_NAME}_link.xsa; cd $(ABS_PATH)
+    -l $(ABS_PATH)/training-libadf.a $(IMAGE_PROCESSING_XO) $(PASS_THROUGH_XO) -o ${PROJECT_NAME}_link.xsa; cd $(ABS_PATH)
 
 # Invole _package target and install overloay/ to OVLY_INSTALL_DIR
 package: _package
