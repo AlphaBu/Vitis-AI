@@ -408,10 +408,22 @@ All commands below assume you `cd` into the design directory (so the relative `m
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --dry-run --log-level 5
   ```
 
-- **Benchmark** for 100 runs (no outputs saved, no PL forwarding):
+- **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input copy; `0.000` in zero-copy mode), **PL inference** (kernel launch + wait), and **data-transfer-from-PL** (PL output copy→host):
 
   ```bash
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
+  ```
+
+  Example output:
+
+  ```
+  Average inference time over 100 runs: 1.41 ms
+  Per-stage average (ms/frame, zero-copy ML->PL):
+    ML inference          : 1.410
+    data-transfer-to-PL   : 0.000
+    PL inference          : 0.328
+    data-transfer-from-PL : 0.294
+  Run completed successfully.
   ```
 
 - **Inspect model metadata** (no inference) — prints the CPU + HW tensor view and dumps `<model_basename>_info.json`. Use it to look up the input tensor `name`s needed for `ifms-config`:
@@ -447,7 +459,7 @@ All tensors should report `MATCH`. (For a *real* post-processing kernel the byte
 | ------------------- | --------- | ------- | ------------------------------------------------------------ |
 | `--app-config`      | Mandatory |         | Path to configuration JSON file. Mandatory for inference / dry-run / benchmark flows. Ignored when `--get-model-info` is supplied. |
 | `--runs`            | Optional  | `1`     | Number of iterations to run. |
-| `--benchmark`       | Optional  | `false` | Benchmark the model for `n` runs (skips output saving and PL forwarding). |
+| `--benchmark`       | Optional  | `false` | Benchmark the model for `n` runs. Times the full ML→PL datapath and prints a per-stage breakdown; skips output saving. |
 | `--log-level`       | Optional  | `2`     | Log level: `1`=ERROR, `2`=WARNING, `5`=INFO, `6`=DEBUG. |
 | `--frames`          | Optional  | all     | Number of frames to process per iteration. |
 | `--dry-run`         | Optional  |         | Skip file I/O and PL kernel initialization (test configuration only). |
