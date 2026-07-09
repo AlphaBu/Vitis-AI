@@ -26,6 +26,8 @@
 #include <boost/program_options.hpp>
 #include <boost/property_tree/json_parser.hpp>
 #include <boost/property_tree/ptree.hpp>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <filesystem>
@@ -603,6 +605,9 @@ class pl_pass_through {
     const size_t nwords = (nbytes + 3) / 4;
     const size_t padded = nwords * 4;
 
+    /* Stage 1 (to-PL): stage the source into the input bo and sync it to the
+     * device. This is exactly the work eliminated by the zero-copy path. */
+    const auto t0 = std::chrono::high_resolution_clock::now();
     auto* in_host = m_in_bo.map<uint8_t*>();
     std::memcpy(in_host, src, nbytes);
     if (padded > nbytes) {
@@ -610,16 +615,96 @@ class pl_pass_through {
     }
     m_in_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
-    /* Launch the kernel and wait for completion. Argument order matches the
-     * kernel signature: (in, out, size). */
+    /* Stage 2 (PL exec): launch the kernel and wait for completion. Argument
+     * order matches the kernel signature: (in, out, size). */
+    const auto t1 = std::chrono::high_resolution_clock::now();
     auto run = m_kernel(m_in_bo, m_out_bo, static_cast<int>(nwords));
     run.wait();
 
+    /* Stage 3 (from-PL): sync the result back and copy it to dst. */
+    const auto t2 = std::chrono::high_resolution_clock::now();
     m_out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     std::memcpy(dst, m_out_bo.map<uint8_t*>(), nbytes);
+    const auto t3 = std::chrono::high_resolution_clock::now();
+
+    m_to_pl_us += us(t0, t1);
+    m_pl_exec_us += us(t1, t2);
+    m_from_pl_us += us(t2, t3);
+  }
+
+  /**
+   * @brief Import an NPU output buffer (exported as a dma-buf fd) into this
+   *        PL device as an xrt::bo. The returned bo shares the same physical
+   *        DDR memory as the NPU output tensor, so the PL kernel can read the
+   *        inference result directly with no host copy or host->device sync.
+   *
+   * @param dmabuf_fd dma-buf file descriptor from NpuTensor::export_buffer().
+   * @return An xrt::bo bound to this PL device, aliasing the exported buffer.
+   */
+  xrt::bo import_input(int dmabuf_fd) {
+    return xrt::bo(m_device, static_cast<xrt::bo::export_handle>(dmabuf_fd));
+  }
+
+  /**
+   * @brief Zero-copy forward: run the pass_through kernel reading directly from
+   *        an imported input bo (the NPU output buffer shared via dma-buf) and
+   *        write the kernel result to a host destination buffer.
+   *
+   * Unlike forward(), there is no host memcpy into a staging input bo and no
+   * host->device sync on the input side: the kernel consumes the NPU output
+   * buffer in place. Only the PL output bo is synced back and copied to dst.
+   *
+   * @param in_bo  Imported input bo (from import_input()); aliases NPU output.
+   * @param dst    Host destination for the kernel output (nbytes).
+   * @param nbytes Number of valid bytes to forward.
+   */
+  void forward_zerocopy(const xrt::bo& in_bo, void* dst, size_t nbytes) {
+    if (nbytes == 0) {
+      return;
+    }
+    ensure_out_capacity(nbytes);
+
+    /* pass_through operates on 32-bit words; round the byte count up. */
+    const size_t nwords = (nbytes + 3) / 4;
+
+    /* No to-PL stage: the kernel reads the NPU output buffer in place. */
+    /* Stage 2 (PL exec): launch the kernel and wait. */
+    const auto t1 = std::chrono::high_resolution_clock::now();
+    auto run = m_kernel(in_bo, m_out_bo, static_cast<int>(nwords));
+    run.wait();
+
+    /* Stage 3 (from-PL): sync the result back and copy it to dst. */
+    const auto t2 = std::chrono::high_resolution_clock::now();
+    m_out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    std::memcpy(dst, m_out_bo.map<uint8_t*>(), nbytes);
+    const auto t3 = std::chrono::high_resolution_clock::now();
+
+    /* to-PL stage is zero by construction for the zero-copy path. */
+    m_pl_exec_us += us(t1, t2);
+    m_from_pl_us += us(t2, t3);
+  }
+
+  /* Accumulated sub-stage timers (microseconds), summed over every forward()
+   * / forward_zerocopy() call since the last reset_timers():
+   *   to_pl_us   : host->PL input staging  (memcpy-in + sync TO_DEVICE); 0 for zero-copy
+   *   pl_exec_us : pass_through kernel launch + wait (the PL inference)
+   *   from_pl_us : PL->host output copy-back (sync FROM_DEVICE + memcpy-out) */
+  double to_pl_us() const { return m_to_pl_us; }
+  double pl_exec_us() const { return m_pl_exec_us; }
+  double from_pl_us() const { return m_from_pl_us; }
+  void reset_timers() {
+    m_to_pl_us = 0.0;
+    m_pl_exec_us = 0.0;
+    m_from_pl_us = 0.0;
   }
 
  private:
+  /* Elapsed microseconds between two high_resolution_clock time points. */
+  static double us(const std::chrono::high_resolution_clock::time_point& a,
+                   const std::chrono::high_resolution_clock::time_point& b) {
+    return std::chrono::duration<double, std::micro>(b - a).count();
+  }
+
   /* (Re)allocate the device buffers when a larger transfer is requested.
    * Buffers are sized to whole 32-bit words and reused across calls. */
   void ensure_capacity(size_t nbytes) {
@@ -633,12 +718,30 @@ class pl_pass_through {
     APP_LOG(AppLogLevel::DEBUG, m_app_log, "Allocated PL buffers of %zu bytes", need);
   }
 
+  /* (Re)allocate only the output device buffer (gmem1) for the zero-copy path;
+   * the input bo is supplied per call as an imported dma-buf bo. */
+  void ensure_out_capacity(size_t nbytes) {
+    const size_t need = ((nbytes + 3) / 4) * 4;
+    if (need <= m_out_capacity) {
+      return;
+    }
+    m_out_bo = xrt::bo(m_device, need, m_kernel.group_id(1)); /* gmem1 */
+    m_out_capacity = need;
+    APP_LOG(AppLogLevel::DEBUG, m_app_log, "Allocated PL output buffer of %zu bytes", need);
+  }
+
   xrt::device m_device;
   xrt::kernel m_kernel;
   xrt::bo m_in_bo;
   xrt::bo m_out_bo;
   size_t m_capacity = 0;
+  size_t m_out_capacity = 0;
   AppLogLevel m_app_log;
+
+  /* Per-stage timing accumulators (see the getters above). */
+  double m_to_pl_us = 0.0;
+  double m_pl_exec_us = 0.0;
+  double m_from_pl_us = 0.0;
 }; /* pl_pass_through */
 
 /*
@@ -675,6 +778,22 @@ class app_context {
   /* pass_through PL kernel wrapper (native XRT). Created in init_pl_kernel()
    * for the inference flow; stays null in dry-run / get-model-info. */
   std::unique_ptr<pl_pass_through> m_pl = nullptr;
+
+  /* Zero-copy input bos for the PL kernel: m_pl_in_bos[i][j] is the NPU output
+   * tensor m_outputs[i][j] exported as a dma-buf and imported into the PL
+   * device, so the kernel reads the inference result with no host copy. Built
+   * once in setup_pl_zerocopy() and reused across all frames. */
+  std::vector<std::vector<xrt::bo>> m_pl_in_bos;
+
+  /* When true (default), the ML->PL transfer uses the zero-copy dma-buf path
+   * (forward_zerocopy). Set to false via env PL_ZEROCOPY=0 to use the original
+   * host-copy path (forward) for A/B timing comparison. */
+  bool m_pl_zerocopy = true;
+
+  /* Number of frames the PL forward has covered (summed across all runs), used
+   * as the denominator for the per-stage per-frame timing report. The per-stage
+   * microsecond accumulators live inside the pass_through wrapper (m_pl). */
+  size_t m_pl_forward_frames = 0;
 
   /* IFM file paths resolved in runner-reported input-tensor order.
    * Populated by resolve_ifms_in_runner_order() after the runner is
@@ -1412,6 +1531,59 @@ class app_context {
       APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Failed to initialize PL kernel: %s", e.what());
       return vart_app_status::FAILURE;
     }
+    /* Select the ML->PL transfer path. Zero-copy (dma-buf) is the default;
+     * PL_ZEROCOPY=0 forces the original host-copy path for A/B comparison. */
+    if (const char* env = std::getenv("PL_ZEROCOPY")) {
+      m_pl_zerocopy = !(env[0] == '0' && env[1] == '\0');
+    }
+    APP_LOG(AppLogLevel::RESULT, m_app_opt.app_log, "ML->PL transfer mode: %s",
+            m_pl_zerocopy ? "zero-copy (dma-buf)" : "host-copy");
+    if (m_pl_zerocopy) {
+      /* Bind the runner-allocated output tensors to the PL device via dma-buf
+       * so the kernel reads them zero-copy. Output tensors are allocated once
+       * and reused, so this is done once here. */
+      return setup_pl_zerocopy();
+    }
+    return vart_app_status::SUCCESS;
+  }
+
+  /**
+   * @brief Export every inference output NpuTensor as a dma-buf and import it
+   *        into the PL device, so forward_outputs_through_pl() can run the
+   *        pass_through kernel directly on the NPU output buffers (zero-copy),
+   *        eliminating the per-frame host copy and host->device DMA of the
+   *        ML->PL transfer.
+   *
+   * The output tensors (m_outputs) are runner-allocated once and reused across
+   * all frames, so the exported/imported bos are also built once and reused.
+   * @return Status of the operation.
+   */
+  vart_app_status setup_pl_zerocopy() {
+    if (!m_pl) {
+      APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "PL kernel not initialized before zero-copy setup.");
+      return vart_app_status::FAILURE;
+    }
+    try {
+      m_pl_in_bos.clear();
+      m_pl_in_bos.resize(m_batch_size);
+      for (size_t i = 0; i < m_batch_size; ++i) {
+        m_pl_in_bos[i].reserve(m_num_output_tensors);
+        for (size_t j = 0; j < m_num_output_tensors; ++j) {
+          const int fd = m_outputs[i][j].export_buffer();
+          if (fd < 0) {
+            APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log,
+                    "Failed to export dma-buf for output tensor[%zu][%zu]", i, j);
+            return vart_app_status::FAILURE;
+          }
+          m_pl_in_bos[i].push_back(m_pl->import_input(fd));
+          APP_LOG(AppLogLevel::DEBUG, m_app_opt.app_log,
+                  "Imported output tensor[%zu][%zu] into PL device (zero-copy)", i, j);
+        }
+      }
+    } catch (const std::exception& e) {
+      APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Error setting up PL zero-copy inputs: %s", e.what());
+      return vart_app_status::FAILURE;
+    }
     return vart_app_status::SUCCESS;
   }
 
@@ -1443,13 +1615,26 @@ class app_context {
                     "Failed to get virtual address for output tensor[%zu][%zu]", i, j);
             return vart_app_status::FAILURE;
           }
-          /* Transfer the inference result to the PL kernel, run it, and write
-           * the kernel output back over the same buffer (in-place). */
-          m_pl->forward(data_ptr, data_ptr, nbytes);
+          if (m_pl_zerocopy) {
+            /* Zero-copy ML->PL: run the kernel reading directly from the NPU
+             * output buffer (imported via dma-buf) and write the kernel output
+             * back over the same host buffer (in-place). No host copy or
+             * host->device sync of the inference result is performed. */
+            m_pl->forward_zerocopy(m_pl_in_bos[i][j], data_ptr, nbytes);
+          } else {
+            /* Host-copy ML->PL: memcpy the inference result into a staging bo,
+             * sync host->device, run the kernel, sync back, memcpy out. */
+            m_pl->forward(data_ptr, data_ptr, nbytes);
+          }
           APP_LOG(AppLogLevel::DEBUG, m_app_opt.app_log,
-                  "Forwarded output tensor[%zu][%zu] (%zu bytes) through PL kernel", i, j, nbytes);
+                  "Forwarded output tensor[%zu][%zu] (%zu bytes) through PL kernel (%s)", i, j, nbytes,
+                  m_pl_zerocopy ? "zero-copy" : "host-copy");
         }
       }
+      /* Fine-grained per-stage timing is accumulated inside the pass_through
+       * wrapper (forward/forward_zerocopy); here we only track how many frames
+       * the PL forward covered, for the per-frame averages. */
+      m_pl_forward_frames += actual_batch_size;
     } catch (const std::exception& e) {
       APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Error forwarding outputs through PL kernel: %s", e.what());
       return vart_app_status::FAILURE;
@@ -1723,25 +1908,39 @@ class app_context {
         num_full_batches++;
       }
 
-      if (options.dry_run || benchmark) {
-        /* Log batch completion before incrementing frame_count */
+      if (options.dry_run) {
+        /* Dry run measures nothing past inference: skip the PL forward and the
+         * output file writes entirely. */
         APP_LOG(AppLogLevel::DEBUG, options.app_log,
                 "Completed batch: frames %zu-%zu (%zu frames), total processed: %zu/%zu", frame_count,
                 frame_count + actual_batch_size - 1, actual_batch_size, frame_count + actual_batch_size, total_frames);
 
         frame_count += actual_batch_size;  // Increment frame count by actual batch size
-        /* Skip saving output tensors in dry run or benchmark mode */
         continue;
       }
 
       /* Forward the inference outputs through the pass_through PL kernel and
        * overwrite each output tensor in place with the kernel result, so the
-       * data written to file is the PL kernel output. */
+       * data written to file is the PL kernel output. In benchmark mode this
+       * is still run so its per-stage timings are measured; only the file
+       * writes below are skipped. */
       if (vart_app_status::FAILURE == forward_outputs_through_pl(actual_batch_size)) {
         APP_LOG(AppLogLevel::ERROR, options.app_log, "Failed to forward outputs through PL kernel for frame %zu",
                 frame_count);
-        close_output_files();  // Clean up on error
+        if (!benchmark) {
+          close_output_files();  // Clean up on error
+        }
         return 1;
+      }
+
+      if (benchmark) {
+        /* Skip saving output tensors in benchmark mode (files were not opened). */
+        APP_LOG(AppLogLevel::DEBUG, options.app_log,
+                "Completed batch: frames %zu-%zu (%zu frames), total processed: %zu/%zu", frame_count,
+                frame_count + actual_batch_size - 1, actual_batch_size, frame_count + actual_batch_size, total_frames);
+
+        frame_count += actual_batch_size;  // Increment frame count by actual batch size
+        continue;
       }
 
       /* Write output tensors to files */
@@ -1786,11 +1985,36 @@ class app_context {
    * @param total_runs The total number of inference runs performed.
    */
   void log_average_inference_time(size_t total_frames, double total_inference_time, size_t total_runs) {
-    double avg_time_us = total_inference_time / (total_frames * total_runs);
+    const double denom = static_cast<double>(total_frames * total_runs);
+    double avg_time_us = total_inference_time / denom;
     double avg_time_ms = avg_time_us / 1000;
     std::ostringstream time_str;
     time_str << std::fixed << std::setprecision(2) << avg_time_ms;
     std::cout << "Average inference time over " << total_runs << " runs: " << time_str.str() << " ms" << std::endl;
+
+    /* Per-stage breakdown of the ml_vart_plus_pl datapath, each averaged per
+     * frame. The PL sub-stages come from the pass_through wrapper's internal
+     * timers (accumulated across all runs):
+     *   ML inference        : NPU run_inference() (== the average above)
+     *   data-transfer-to-PL : host->PL input staging (0 for the zero-copy path)
+     *   PL inference        : pass_through kernel launch + wait
+     *   data-transfer-from-PL: PL->host result copy-back (reported for context) */
+    if (m_pl && m_pl_forward_frames > 0) {
+      const double pl_denom = static_cast<double>(m_pl_forward_frames);
+      const double ml_ms = avg_time_ms;
+      const double to_pl_ms = (m_pl->to_pl_us() / pl_denom) / 1000.0;
+      const double pl_exec_ms = (m_pl->pl_exec_us() / pl_denom) / 1000.0;
+      const double from_pl_ms = (m_pl->from_pl_us() / pl_denom) / 1000.0;
+
+      std::cout << std::fixed << std::setprecision(3);
+      std::cout << "Per-stage average (ms/frame, " << (m_pl_zerocopy ? "zero-copy" : "host-copy")
+                << " ML->PL):" << std::endl;
+      std::cout << "  ML inference          : " << ml_ms << std::endl;
+      std::cout << "  data-transfer-to-PL   : " << to_pl_ms << std::endl;
+      std::cout << "  PL inference          : " << pl_exec_ms << std::endl;
+      std::cout << "  data-transfer-from-PL : " << from_pl_ms << std::endl;
+      std::cout.unsetf(std::ios::floatfield);
+    }
   }
 };
 
