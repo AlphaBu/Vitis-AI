@@ -1,0 +1,21 @@
+{
+    "inference-config": {
+        "model-file": "yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai",
+        "runner-options": {
+            "log-level": "WARNING",
+            "ai-analyzer-profiling": false
+        }
+    },
+    "ifms-config": [
+        {
+            "name": "onnx::DequantizeLinear_229",
+            "file": "inputSubBO_vaiml_par_0_id_0_0_0_trim.bin"
+        }
+    ],
+    "ofms-dir": "output_plus_pl",
+    "pl-config": {
+        "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
+        "kernel-name": "pass_through",
+        "device-index": 1
+    }
+}
