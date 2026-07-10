@@ -646,23 +646,38 @@ class pl_pass_through {
   }
 
   /**
-   * @brief Zero-copy forward: run the pass_through kernel reading directly from
-   *        an imported input bo (the NPU output buffer shared via dma-buf) and
-   *        write the kernel result to a host destination buffer.
+   * @brief Allocate a persistent PL output bo (gmem1) sized to nbytes (rounded
+   *        up to whole 32-bit words). The caller keeps the bo alive and reads
+   *        the kernel result directly from its host mapping (bo.map()), so no
+   *        host copy of the output is needed — this enables output-side
+   *        zero-copy in forward_zerocopy_io().
    *
-   * Unlike forward(), there is no host memcpy into a staging input bo and no
-   * host->device sync on the input side: the kernel consumes the NPU output
-   * buffer in place. Only the PL output bo is synced back and copied to dst.
+   * @param nbytes Number of valid bytes the kernel will write to this bo.
+   * @return A device bo bound to gmem1, host-mappable via bo.map().
+   */
+  xrt::bo alloc_output(size_t nbytes) {
+    const size_t need = ((nbytes + 3) / 4) * 4;
+    return xrt::bo(m_device, need, m_kernel.group_id(1)); /* gmem1 */
+  }
+
+  /**
+   * @brief Full zero-copy I/O forward: the kernel reads the imported NPU-output
+   *        bo in place (input zero-copy) and writes into a caller-owned,
+   *        persistent output bo. Input and output are DIFFERENT buffers.
+   *
+   * Unlike forward(), there is no host memcpy on either side: the input is the
+   * NPU output buffer read in place, and the host reads the result straight
+   * from out_bo.map() (see alloc_output()). Only a FROM_DEVICE cache sync is
+   * done so the CPU sees the kernel's writes; there is no from-PL memcpy.
    *
    * @param in_bo  Imported input bo (from import_input()); aliases NPU output.
-   * @param dst    Host destination for the kernel output (nbytes).
+   * @param out_bo Persistent PL output bo (from alloc_output()); host-mapped.
    * @param nbytes Number of valid bytes to forward.
    */
-  void forward_zerocopy(const xrt::bo& in_bo, void* dst, size_t nbytes) {
+  void forward_zerocopy_io(const xrt::bo& in_bo, xrt::bo& out_bo, size_t nbytes) {
     if (nbytes == 0) {
       return;
     }
-    ensure_out_capacity(nbytes);
 
     /* pass_through operates on 32-bit words; round the byte count up. */
     const size_t nwords = (nbytes + 3) / 4;
@@ -670,13 +685,13 @@ class pl_pass_through {
     /* No to-PL stage: the kernel reads the NPU output buffer in place. */
     /* Stage 2 (PL exec): launch the kernel and wait. */
     const auto t1 = std::chrono::high_resolution_clock::now();
-    auto run = m_kernel(in_bo, m_out_bo, static_cast<int>(nwords));
+    auto run = m_kernel(in_bo, out_bo, static_cast<int>(nwords));
     run.wait();
 
-    /* Stage 3 (from-PL): sync the result back and copy it to dst. */
+    /* Stage 3 (from-PL): only a cache sync — the host reads out_bo.map()
+     * directly, so there is no output memcpy. */
     const auto t2 = std::chrono::high_resolution_clock::now();
-    m_out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-    std::memcpy(dst, m_out_bo.map<uint8_t*>(), nbytes);
+    out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     const auto t3 = std::chrono::high_resolution_clock::now();
 
     /* to-PL stage is zero by construction for the zero-copy path. */
@@ -685,10 +700,11 @@ class pl_pass_through {
   }
 
   /* Accumulated sub-stage timers (microseconds), summed over every forward()
-   * / forward_zerocopy() call since the last reset_timers():
+   * / forward_zerocopy_io() call since the last reset_timers():
    *   to_pl_us   : host->PL input staging  (memcpy-in + sync TO_DEVICE); 0 for zero-copy
    *   pl_exec_us : pass_through kernel launch + wait (the PL inference)
-   *   from_pl_us : PL->host output copy-back (sync FROM_DEVICE + memcpy-out) */
+   *   from_pl_us : PL->host output; host-copy = sync FROM_DEVICE + memcpy-out,
+   *                zero-copy = sync FROM_DEVICE only (no memcpy) */
   double to_pl_us() const { return m_to_pl_us; }
   double pl_exec_us() const { return m_pl_exec_us; }
   double from_pl_us() const { return m_from_pl_us; }
@@ -718,24 +734,11 @@ class pl_pass_through {
     APP_LOG(AppLogLevel::DEBUG, m_app_log, "Allocated PL buffers of %zu bytes", need);
   }
 
-  /* (Re)allocate only the output device buffer (gmem1) for the zero-copy path;
-   * the input bo is supplied per call as an imported dma-buf bo. */
-  void ensure_out_capacity(size_t nbytes) {
-    const size_t need = ((nbytes + 3) / 4) * 4;
-    if (need <= m_out_capacity) {
-      return;
-    }
-    m_out_bo = xrt::bo(m_device, need, m_kernel.group_id(1)); /* gmem1 */
-    m_out_capacity = need;
-    APP_LOG(AppLogLevel::DEBUG, m_app_log, "Allocated PL output buffer of %zu bytes", need);
-  }
-
   xrt::device m_device;
   xrt::kernel m_kernel;
   xrt::bo m_in_bo;
   xrt::bo m_out_bo;
   size_t m_capacity = 0;
-  size_t m_out_capacity = 0;
   AppLogLevel m_app_log;
 
   /* Per-stage timing accumulators (see the getters above). */
@@ -785,9 +788,18 @@ class app_context {
    * once in setup_pl_zerocopy() and reused across all frames. */
   std::vector<std::vector<xrt::bo>> m_pl_in_bos;
 
-  /* When true (default), the ML->PL transfer uses the zero-copy dma-buf path
-   * (forward_zerocopy). Set to false via env PL_ZEROCOPY=0 to use the original
-   * host-copy path (forward) for A/B timing comparison. */
+  /* Zero-copy output bos for the PL kernel: m_pl_out_bos[i][j] is a persistent
+   * PL output buffer (gmem1) the kernel writes into (different buffer from the
+   * input), and m_pl_out_ptrs[i][j] is its host mapping. The host reads the
+   * kernel result directly from that pointer with no from-PL memcpy. Built once
+   * in setup_pl_zerocopy() alongside the input bos and reused across frames. */
+  std::vector<std::vector<xrt::bo>> m_pl_out_bos;
+  std::vector<std::vector<uint8_t*>> m_pl_out_ptrs;
+
+  /* When true (default), the ML<->PL transfer uses the zero-copy path
+   * (forward_zerocopy_io: dma-buf input + host-mapped output bo). Set to false
+   * via env PL_ZEROCOPY=0 to use the original host-copy path (forward) for A/B
+   * timing comparison. */
   bool m_pl_zerocopy = true;
 
   /* Number of frames the PL forward has covered (summed across all runs), used
@@ -1566,9 +1578,17 @@ class app_context {
     try {
       m_pl_in_bos.clear();
       m_pl_in_bos.resize(m_batch_size);
+      m_pl_out_bos.clear();
+      m_pl_out_bos.resize(m_batch_size);
+      m_pl_out_ptrs.clear();
+      m_pl_out_ptrs.resize(m_batch_size);
       for (size_t i = 0; i < m_batch_size; ++i) {
         m_pl_in_bos[i].reserve(m_num_output_tensors);
+        m_pl_out_bos[i].reserve(m_num_output_tensors);
+        m_pl_out_ptrs[i].reserve(m_num_output_tensors);
         for (size_t j = 0; j < m_num_output_tensors; ++j) {
+          /* Input side (zero-copy): import the NPU output tensor as a dma-buf
+           * so the kernel reads it in place. */
           const int fd = m_outputs[i][j].export_buffer();
           if (fd < 0) {
             APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log,
@@ -1576,12 +1596,20 @@ class app_context {
             return vart_app_status::FAILURE;
           }
           m_pl_in_bos[i].push_back(m_pl->import_input(fd));
+
+          /* Output side (zero-copy): a persistent PL output bo (different
+           * buffer from the input) the kernel writes into, mapped once so the
+           * host reads the result directly with no from-PL memcpy. */
+          xrt::bo out_bo = m_pl->alloc_output(m_output_tensors_info[j].size_in_bytes);
+          m_pl_out_ptrs[i].push_back(out_bo.map<uint8_t*>());
+          m_pl_out_bos[i].push_back(std::move(out_bo));
+
           APP_LOG(AppLogLevel::DEBUG, m_app_opt.app_log,
-                  "Imported output tensor[%zu][%zu] into PL device (zero-copy)", i, j);
+                  "Bound output tensor[%zu][%zu] for zero-copy I/O (in imported, out mapped)", i, j);
         }
       }
     } catch (const std::exception& e) {
-      APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Error setting up PL zero-copy inputs: %s", e.what());
+      APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Error setting up PL zero-copy buffers: %s", e.what());
       return vart_app_status::FAILURE;
     }
     return vart_app_status::SUCCESS;
@@ -1589,13 +1617,16 @@ class app_context {
 
   /**
    * @brief Forward this batch's inference outputs through the pass_through PL
-   *        kernel, in-place.
+   *        kernel.
    *
-   * For each valid frame and each output tensor: the inference result bytes
-   * are transferred to the PL kernel, the kernel is launched, and the kernel
-   * output is written back over the same host buffer. After this call each
-   * output NpuTensor holds the PL kernel's output (a byte-exact copy of the
-   * inference result for the pass_through kernel).
+   * For each valid frame and each output tensor the kernel is launched on the
+   * inference result. In zero-copy mode (default) the kernel reads the NPU
+   * output buffer in place and writes into a persistent PL output bo, and the
+   * kernel result is read later from that bo's host mapping (m_pl_out_ptrs) in
+   * write_output_tensors() — no host copy on either side. In the host-copy
+   * path the result is staged to the PL device and written back over the NPU
+   * output tensor. For the pass_through kernel the output is a byte-exact copy
+   * of the inference result in both modes.
    *
    * @param actual_batch_size Number of valid frames in the current batch.
    * @return Status of the operation.
@@ -1616,11 +1647,13 @@ class app_context {
             return vart_app_status::FAILURE;
           }
           if (m_pl_zerocopy) {
-            /* Zero-copy ML->PL: run the kernel reading directly from the NPU
-             * output buffer (imported via dma-buf) and write the kernel output
-             * back over the same host buffer (in-place). No host copy or
-             * host->device sync of the inference result is performed. */
-            m_pl->forward_zerocopy(m_pl_in_bos[i][j], data_ptr, nbytes);
+            /* Zero-copy I/O: the kernel reads the NPU output buffer in place
+             * (imported via dma-buf) and writes into a persistent PL output bo.
+             * No host copy or host->device sync on the input side and no
+             * from-PL memcpy on the output side; the host reads the result
+             * directly from m_pl_out_ptrs[i][j] (see write_output_tensors). */
+            (void)data_ptr;
+            m_pl->forward_zerocopy_io(m_pl_in_bos[i][j], m_pl_out_bos[i][j], nbytes);
           } else {
             /* Host-copy ML->PL: memcpy the inference result into a staging bo,
              * sync host->device, run the kernel, sync back, memcpy out. */
@@ -1632,8 +1665,8 @@ class app_context {
         }
       }
       /* Fine-grained per-stage timing is accumulated inside the pass_through
-       * wrapper (forward/forward_zerocopy); here we only track how many frames
-       * the PL forward covered, for the per-frame averages. */
+       * wrapper (forward/forward_zerocopy_io); here we only track how many
+       * frames the PL forward covered, for the per-frame averages. */
       m_pl_forward_frames += actual_batch_size;
     } catch (const std::exception& e) {
       APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Error forwarding outputs through PL kernel: %s", e.what());
@@ -1811,8 +1844,13 @@ class app_context {
             return vart_app_status::FAILURE;
           }
 
-          /* Get virtual address from the allocated tensor */
-          const void* data_ptr = m_outputs[i][j].get_virtual_address();
+          /* Source of the PL kernel output: in zero-copy mode the kernel writes
+           * into a persistent PL output bo, so read straight from its host
+           * mapping (no from-PL memcpy). Otherwise the host-copy path wrote the
+           * result back over the NPU output tensor, so read that. */
+          const void* data_ptr = (m_pl && m_pl_zerocopy)
+                                     ? static_cast<const void*>(m_pl_out_ptrs[i][j])
+                                     : m_outputs[i][j].get_virtual_address();
           if (!data_ptr) {
             APP_LOG(AppLogLevel::ERROR, m_app_opt.app_log, "Failed to get virtual address for output tensor[%zu][%zu]",
                     i, j);

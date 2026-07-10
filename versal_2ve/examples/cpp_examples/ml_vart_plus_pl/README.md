@@ -36,7 +36,7 @@ The example uses the `pass_through` kernel, which is an **identity copy** kernel
   - [1.3 Write a thin XRT wrapper for the kernel](#13-write-a-thin-xrt-wrapper-for-the-kernel)
   - [1.4 Initialize the kernel once](#14-initialize-the-kernel-once)
   - [1.5 Forward the outputs after each inference](#15-forward-the-outputs-after-each-inference)
-  - [1.5.1 Zero-copy the ML→PL transfer (dma-buf, default)](#151-zero-copy-the-mlpl-transfer-dma-buf-default)
+  - [1.5.1 Zero-copy the ML↔PL transfers (dma-buf, default)](#151-zero-copy-the-mlpl-transfers-dma-buf-default)
   - [1.6 Wire it into `main()`](#16-wire-it-into-main)
   - [1.7 Extend the JSON config](#17-extend-the-json-config)
 - [Part 2: Building](#part-2-building)
@@ -242,21 +242,25 @@ vart_app_status forward_outputs_through_pl(size_t actual_batch_size) {
 
 `vart::NpuTensor::get_virtual_address()` returns the host-visible pointer to the tensor data; `NpuTensorInfo::size_in_bytes` is the **per-frame** size.
 
-### 1.5.1 Zero-copy the ML→PL transfer (dma-buf, default)
+### 1.5.1 Zero-copy the ML↔PL transfers (dma-buf, default)
 
-The `forward()` shown above copies the NPU output into a staging `xrt::bo` and DMAs it to
-the PL device (`memcpy` + `sync(BO_TO_DEVICE)`) before every kernel launch. On Versal the
-NPU and the PL region share the **same physical DDR**, so that input copy is unnecessary:
-the PL kernel can read the NPU output buffer **in place**. This is the app's **default**
-ML→PL path; the host-copy path is kept only for A/B comparison (see the `PL_ZEROCOPY`
-toggle below).
+The `forward()` shown above copies data twice per frame: it `memcpy`s the NPU output into a
+staging `xrt::bo` and DMAs it to the PL device (`sync(BO_TO_DEVICE)`) **before** the launch,
+then after the launch it `sync(BO_TO_DEVICE)`s the result back and `memcpy`s it to the host.
+On Versal the NPU and the PL region share the **same physical DDR**, so **both** copies are
+unnecessary: the kernel can read the NPU output buffer in place **and** write into a bo the
+host reads in place. This full input+output zero-copy is the app's **default** ML↔PL path;
+the host-copy path is kept only for A/B comparison (see the `PL_ZEROCOPY` toggle below).
 
-Zero-copy uses a **dma-buf**: export each NPU output `NpuTensor` as a dma-buf file
-descriptor, then import that fd into the PL device as an `xrt::bo`. The imported bo aliases
-the same DDR as the NPU output tensor, so no host copy and no host→device sync happen on
-the input side.
+Zero-copy uses a **dma-buf** on the input side: export each NPU output `NpuTensor` as a
+dma-buf file descriptor, then import that fd into the PL device as an `xrt::bo`. The imported
+bo aliases the same DDR as the NPU output tensor, so no host copy and no host→device sync
+happen on the input side. On the output side, allocate a **persistent, host-mapped** PL
+output bo per tensor; the kernel writes into it, and the host reads the result straight from
+its mapping — the only remaining PL→host step is a cache sync (no memcpy).
 
-Add an **import** helper and a **zero-copy forward** to the wrapper:
+Add an **import** helper, an **output allocator**, and a **zero-copy I/O forward** to the
+wrapper:
 
 ```cpp
 // Import an NPU output buffer (exported as a dma-buf fd) into this PL device.
@@ -265,50 +269,77 @@ xrt::bo import_input(int dmabuf_fd) {
   return xrt::bo(m_device, static_cast<xrt::bo::export_handle>(dmabuf_fd));
 }
 
-// Zero-copy forward: the kernel reads the imported NPU-output bo in place.
-// No to-PL memcpy and no BO_TO_DEVICE sync — only the PL output is synced back.
-void forward_zerocopy(const xrt::bo& in_bo, void* dst, size_t nbytes) {
+// Allocate a persistent, host-mappable PL output bo (gmem1) for output zero-copy.
+// The caller keeps it alive and reads the kernel result via bo.map() — no copy.
+xrt::bo alloc_output(size_t nbytes) {
+  const size_t need = ((nbytes + 3) / 4) * 4;      // round up to whole 32-bit words
+  return xrt::bo(m_device, need, m_kernel.group_id(1));
+}
+
+// Zero-copy I/O forward: the kernel reads the imported NPU-output bo in place and
+// writes into a persistent, host-mapped out_bo. No memcpy on EITHER side — the only
+// PL->host step is a FROM_DEVICE cache sync so the CPU sees the kernel's writes.
+void forward_zerocopy_io(const xrt::bo& in_bo, xrt::bo& out_bo, size_t nbytes) {
   if (nbytes == 0) return;
-  ensure_out_capacity(nbytes);
   const size_t nwords = (nbytes + 3) / 4;
 
-  auto run = m_kernel(in_bo, m_out_bo, static_cast<int>(nwords));   // in place
+  auto run = m_kernel(in_bo, out_bo, static_cast<int>(nwords));   // both in place
   run.wait();
 
-  m_out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-  std::memcpy(dst, m_out_bo.map<uint8_t*>(), nbytes);
+  out_bo.sync(XCL_BO_SYNC_BO_FROM_DEVICE);   // cache invalidate only; no from-PL memcpy
 }
 ```
 
-Because the runner allocates the output tensors **once** and reuses them across all
-frames, export+import is done **once** at init (right after `init_pl_kernel()`), and the
-imported bos are reused for every frame:
+> **Why a separate, persistent output bo per tensor?** Because there is no immediate
+> copy-out, the host reads the result later (in `write_output_tensors`). A single shared
+> output bo would be overwritten by the next tensor's launch before the host reads it, so
+> each output tensor needs its **own** bo that stays alive. Input and output are genuinely
+> different buffers — this does **not** rely on `pass_through` being an identity kernel.
+
+Because the runner allocates the output tensors **once** and reuses them across all frames,
+export+import (input) and allocate+map (output) are done **once** at init (right after
+`init_pl_kernel()`), and both sets of bos are reused for every frame:
 
 ```cpp
-// One imported PL input bo per [frame][output-tensor], built once and reused.
-std::vector<std::vector<xrt::bo>> m_pl_in_bos;
+// One imported PL input bo + one persistent output bo (and its host mapping)
+// per [frame][output-tensor], all built once and reused.
+std::vector<std::vector<xrt::bo>>   m_pl_in_bos;
+std::vector<std::vector<xrt::bo>>   m_pl_out_bos;
+std::vector<std::vector<uint8_t*>>  m_pl_out_ptrs;   // out_bo.map() pointers
 
 vart_app_status setup_pl_zerocopy() {
   m_pl_in_bos.assign(m_batch_size, {});
+  m_pl_out_bos.assign(m_batch_size, {});
+  m_pl_out_ptrs.assign(m_batch_size, {});
   for (size_t i = 0; i < m_batch_size; ++i) {
     for (size_t j = 0; j < m_num_output_tensors; ++j) {
-      const int fd = m_outputs[i][j].export_buffer();   // NpuTensor -> dma-buf fd
+      const int fd = m_outputs[i][j].export_buffer();     // NpuTensor -> dma-buf fd
       if (fd < 0) { /* error: export failed */ return vart_app_status::FAILURE; }
-      m_pl_in_bos[i].push_back(m_pl->import_input(fd)); // import into PL device
+      m_pl_in_bos[i].push_back(m_pl->import_input(fd));    // import into PL device
+      const size_t nbytes = m_output_tensors_info[j].size_in_bytes;
+      xrt::bo out_bo = m_pl->alloc_output(nbytes);         // persistent PL output bo
+      m_pl_out_ptrs[i].push_back(out_bo.map<uint8_t*>());  // host mapping (read here)
+      m_pl_out_bos[i].push_back(std::move(out_bo));
     }
   }
   return vart_app_status::SUCCESS;
 }
 ```
 
-Then the per-frame forwarding just launches the kernel on the pre-imported bo instead of
-copying:
+Then the per-frame forwarding just launches the kernel on the pre-imported/pre-allocated bos
+instead of copying, and `write_output_tensors` reads the OFM directly from the PL output
+mapping when zero-copy is on:
 
 ```cpp
 if (m_pl_zerocopy)
-  m_pl->forward_zerocopy(m_pl_in_bos[i][j], data_ptr, nbytes);  // no input copy
+  m_pl->forward_zerocopy_io(m_pl_in_bos[i][j], m_pl_out_bos[i][j], nbytes);  // no copies
 else
-  m_pl->forward(data_ptr, data_ptr, nbytes);                    // host-copy fallback
+  m_pl->forward(data_ptr, data_ptr, nbytes);                                 // host-copy
+
+// ... later, when saving:
+const void* data_ptr = (m_pl && m_pl_zerocopy)
+                           ? static_cast<const void*>(m_pl_out_ptrs[i][j])   // read in place
+                           : m_outputs[i][j].get_virtual_address();
 ```
 
 **A/B toggle.** Zero-copy is on by default; set the environment variable `PL_ZEROCOPY=0`
@@ -321,18 +352,36 @@ if (const char* env = std::getenv("PL_ZEROCOPY"))
 if (m_pl_zerocopy) return setup_pl_zerocopy();   // export+import once
 ```
 
-**Effect.** Zero-copy removes the entire host→PL input transfer. In the `--benchmark`
+**Effect.** Zero-copy removes **both** host↔PL data transfers. In the `--benchmark`
 per-stage breakdown (see [3.5](#35-example-run-commands)) the **data-transfer-to-PL** stage
-drops to `0.000` ms/frame, while PL inference and the output copy-back are unchanged. The
-output side is still copied back because `pass_through` writes to a separate output bank;
-a kernel that writes into an NPU-visible buffer could make the output zero-copy too.
+drops to `0.000` ms/frame (input read in place, no sync issued), and **data-transfer-from-PL**
+collapses from an O(nbytes) memcpy to just the FROM_DEVICE cache sync. Measured on VEK385
+(YOLOX-Nano, 3 OFM heads ≈ 312 KB/frame):
+
+| stage (ms/frame) | zero-copy | host-copy (`PL_ZEROCOPY=0`) |
+|---|---|---|
+| data-transfer-to-PL | **0.000** | 0.313 |
+| data-transfer-from-PL | **0.011** | 0.313 |
+
+That is ≈ 0.62 ms/frame of pure host↔PL copy overhead removed. ML inference and PL inference
+are unchanged. Note the two directions are asymmetric: **to-PL** issues no sync at all (the
+NPU already produced the data into shared DDR, so there is nothing for the host to push),
+whereas **from-PL** must issue one `sync(FROM_DEVICE)` because the PL (device) wrote the
+buffer and the host (CPU) reads it, so the CPU cache must be invalidated. The remaining
+0.011 ms is that fixed cache-management cost, largely independent of data size.
 
 > **Requirements / caveats.**
 > - Needs shared physical memory between the NPU and PL (true on Versal DDR) and dma-buf
 >   support (`NpuTensor::export_buffer()` returning a valid fd, `xrt::bo` import).
-> - Export/import assumes the output tensors are allocated once and reused; rebuild the
->   imported bos if you reallocate tensors.
+> - Export/import and output-bo allocation assume the output tensors are allocated once and
+>   reused; rebuild the imported/allocated bos if you reallocate tensors.
 > - If `export_buffer()` fails (returns `-1`), fall back to the host-copy `forward()`.
+> - The output bos must be **persistent and one-per-tensor** (no immediate copy-out), so
+>   they live for the whole run; this costs one extra host-mapped DDR buffer per output
+>   tensor.
+> - The final `sync(FROM_DEVICE)` is cache coherency, not a data transfer; it can only be
+>   dropped if the output bo is allocated as non-cacheable/coherent memory (which may make
+>   the host's subsequent reads slower — measure before choosing).
 
 ### 1.6 Wire it into `main()`
 
@@ -501,23 +550,26 @@ All commands below assume you `cd` into the design directory (so the relative `m
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --dry-run --log-level 5
   ```
 
-- **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input copy; `0.000` in zero-copy mode), **PL inference** (kernel launch + wait), and **data-transfer-from-PL** (PL output copy→host):
+- **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input staging; `0.000` in zero-copy mode), **PL inference** (kernel launch + wait), and **data-transfer-from-PL** (PL→host output; a full memcpy in host-copy mode, only a cache sync in zero-copy mode):
 
   ```bash
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
   ```
 
-  Example output:
+  Example output (zero-copy, the default — both transfers near zero):
 
   ```
-  Average inference time over 100 runs: 1.41 ms
+  Average inference time over 100 runs: 1.38 ms
   Per-stage average (ms/frame, zero-copy ML->PL):
-    ML inference          : 1.410
+    ML inference          : 1.378
     data-transfer-to-PL   : 0.000
-    PL inference          : 0.328
-    data-transfer-from-PL : 0.294
+    PL inference          : 0.327
+    data-transfer-from-PL : 0.011
   Run completed successfully.
   ```
+
+  For comparison, the host-copy path (`PL_ZEROCOPY=0`) pays an O(nbytes) memcpy in **both**
+  directions (≈ 0.31 ms/frame each here); zero-copy removes essentially all of it.
 
 - **Inspect model metadata** (no inference) — prints the CPU + HW tensor view and dumps `<model_basename>_info.json`. Use it to look up the input tensor `name`s needed for `ifms-config`:
 
