@@ -2028,7 +2028,7 @@ class app_context {
     double avg_time_ms = avg_time_us / 1000;
     std::ostringstream time_str;
     time_str << std::fixed << std::setprecision(2) << avg_time_ms;
-    std::cout << "Average inference time over " << total_runs << " runs: " << time_str.str() << " ms" << std::endl;
+    std::cout << "Average inference time over " << total_runs << " runs (ML only): " << time_str.str() << " ms" << std::endl;
 
     /* Per-stage breakdown of the ml_vart_plus_pl datapath, each averaged per
      * frame. The PL sub-stages come from the pass_through wrapper's internal

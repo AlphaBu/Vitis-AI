@@ -559,7 +559,7 @@ All commands below assume you `cd` into the design directory (so the relative `m
   Example output (zero-copy, the default — both transfers near zero):
 
   ```
-  Average inference time over 100 runs: 1.38 ms
+  Average inference time over 100 runs (ML only): 1.38 ms
   Per-stage average (ms/frame, zero-copy ML->PL):
     ML inference          : 1.378
     data-transfer-to-PL   : 0.000
