@@ -226,15 +226,15 @@ Example output:
 ```
 Average inference time over 100 runs (ML only): 1.38 ms
 Per-stage average (ms/frame, zero-copy ML->PL):
-  ML inference          : 1.378
-  data-transfer-to-PL   : 0.000
-  PL inference          : 0.327
-  data-transfer-from-PL : 0.011
+  ML inference             : 1.378
+  data-transfer-to-PL      : 0.000
+  PL dummy post processing : 0.327
+  data-transfer-from-PL    : 0.011
 Run completed successfully.
 ```
 
 The per‑stage breakdown separates the NPU **ML inference**, the **data‑transfer‑to‑PL**
-(host→PL input copy; `0.000` in zero‑copy mode), the **PL inference** (kernel launch +
+(host→PL input copy; `0.000` in zero‑copy mode), the **PL dummy post processing** (kernel launch +
 wait), and the **data‑transfer‑from‑PL** (PL output copy→host), so you can see exactly
 where time goes in the combined ML+PL datapath.
 

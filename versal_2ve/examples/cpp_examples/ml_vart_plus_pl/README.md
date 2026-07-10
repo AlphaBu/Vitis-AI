@@ -363,7 +363,7 @@ collapses from an O(nbytes) memcpy to just the FROM_DEVICE cache sync. Measured 
 | data-transfer-to-PL | **0.000** | 0.313 |
 | data-transfer-from-PL | **0.011** | 0.313 |
 
-That is ≈ 0.62 ms/frame of pure host↔PL copy overhead removed. ML inference and PL inference
+That is ≈ 0.62 ms/frame of pure host↔PL copy overhead removed. ML inference and PL dummy post processing
 are unchanged. Note the two directions are asymmetric: **to-PL** issues no sync at all (the
 NPU already produced the data into shared DDR, so there is nothing for the host to push),
 whereas **from-PL** must issue one `sync(FROM_DEVICE)` because the PL (device) wrote the
@@ -550,7 +550,7 @@ All commands below assume you `cd` into the design directory (so the relative `m
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --dry-run --log-level 5
   ```
 
-- **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input staging; `0.000` in zero-copy mode), **PL inference** (kernel launch + wait), and **data-transfer-from-PL** (PL→host output; a full memcpy in host-copy mode, only a cache sync in zero-copy mode):
+- **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input staging; `0.000` in zero-copy mode), **PL dummy post processing** (kernel launch + wait), and **data-transfer-from-PL** (PL→host output; a full memcpy in host-copy mode, only a cache sync in zero-copy mode):
 
   ```bash
   ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
@@ -561,10 +561,10 @@ All commands below assume you `cd` into the design directory (so the relative `m
   ```
   Average inference time over 100 runs (ML only): 1.38 ms
   Per-stage average (ms/frame, zero-copy ML->PL):
-    ML inference          : 1.378
-    data-transfer-to-PL   : 0.000
-    PL inference          : 0.327
-    data-transfer-from-PL : 0.011
+    ML inference             : 1.378
+    data-transfer-to-PL      : 0.000
+    PL dummy post processing : 0.327
+    data-transfer-from-PL    : 0.011
   Run completed successfully.
   ```
 

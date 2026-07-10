@@ -702,7 +702,7 @@ class pl_pass_through {
   /* Accumulated sub-stage timers (microseconds), summed over every forward()
    * / forward_zerocopy_io() call since the last reset_timers():
    *   to_pl_us   : host->PL input staging  (memcpy-in + sync TO_DEVICE); 0 for zero-copy
-   *   pl_exec_us : pass_through kernel launch + wait (the PL inference)
+   *   pl_exec_us : pass_through kernel launch + wait (the PL dummy post processing)
    *   from_pl_us : PL->host output; host-copy = sync FROM_DEVICE + memcpy-out,
    *                zero-copy = sync FROM_DEVICE only (no memcpy) */
   double to_pl_us() const { return m_to_pl_us; }
@@ -2035,7 +2035,7 @@ class app_context {
      * timers (accumulated across all runs):
      *   ML inference        : NPU run_inference() (== the average above)
      *   data-transfer-to-PL : host->PL input staging (0 for the zero-copy path)
-     *   PL inference        : pass_through kernel launch + wait
+     *   PL dummy post processing: pass_through kernel launch + wait
      *   data-transfer-from-PL: PL->host result copy-back (reported for context) */
     if (m_pl && m_pl_forward_frames > 0) {
       const double pl_denom = static_cast<double>(m_pl_forward_frames);
@@ -2047,10 +2047,10 @@ class app_context {
       std::cout << std::fixed << std::setprecision(3);
       std::cout << "Per-stage average (ms/frame, " << (m_pl_zerocopy ? "zero-copy" : "host-copy")
                 << " ML->PL):" << std::endl;
-      std::cout << "  ML inference          : " << ml_ms << std::endl;
-      std::cout << "  data-transfer-to-PL   : " << to_pl_ms << std::endl;
-      std::cout << "  PL inference          : " << pl_exec_ms << std::endl;
-      std::cout << "  data-transfer-from-PL : " << from_pl_ms << std::endl;
+      std::cout << "  ML inference             : " << ml_ms << std::endl;
+      std::cout << "  data-transfer-to-PL      : " << to_pl_ms << std::endl;
+      std::cout << "  PL dummy post processing : " << pl_exec_ms << std::endl;
+      std::cout << "  data-transfer-from-PL    : " << from_pl_ms << std::endl;
       std::cout.unsetf(std::ios::floatfield);
     }
   }
