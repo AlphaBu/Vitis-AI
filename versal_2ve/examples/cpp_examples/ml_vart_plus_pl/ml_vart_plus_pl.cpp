@@ -563,15 +563,23 @@ static std::string get_rounding_mode_string(vart::RoundingMode mode) {
  *        Logic) kernel.
  *
  * The pass_through HLS kernel has the signature:
- *     void pass_through(const ap_uint<32>* in, ap_uint<32>* out, int size);
- * It copies `size` 32-bit words from global-memory bank gmem0 (in) to gmem1
- * (out). This wrapper loads the kernel from an .xclbin and exposes forward():
+ *     void pass_through(const ap_uint<512>* in, ap_uint<512>* out, int size);
+ * It copies `size` 512-bit words (64-byte AXI4 beats) from global-memory bank
+ * gmem0 (in) to gmem1 (out). This wrapper loads the kernel from an .xclbin and
+ * exposes forward():
  * copy `nbytes` from a host source buffer through the kernel and write the
  * kernel result to a host destination buffer. The transfer is byte-oriented,
  * so it is agnostic to the tensor data type (int8 / bf16 / fp32 / ...).
  */
 class pl_pass_through {
  public:
+  /* The pass_through kernel has a 512-bit (64-byte) AXI4 data path: its `size`
+   * argument is the number of 512-bit words (beats) to copy, and each m_axi
+   * access is a full 64-byte beat. Host transfers are therefore rounded up to a
+   * whole beat, and the kernel is passed the beat count (not a 32-bit word
+   * count). */
+  static constexpr size_t kBeatBytes = 64;
+
   pl_pass_through(const std::string& xclbin_path,
                   const std::string& kernel_name,
                   AppLogLevel app_log,
@@ -601,9 +609,10 @@ class pl_pass_through {
     }
     ensure_capacity(nbytes);
 
-    /* pass_through operates on 32-bit words; round the byte count up. */
-    const size_t nwords = (nbytes + 3) / 4;
-    const size_t padded = nwords * 4;
+    /* pass_through operates on 512-bit (64-byte) beats; round the byte count up
+     * to a whole beat and pass the beat count as the kernel `size` argument. */
+    const size_t nbeats = (nbytes + kBeatBytes - 1) / kBeatBytes;
+    const size_t padded = nbeats * kBeatBytes;
 
     /* Stage 1 (to-PL): stage the source into the input bo and sync it to the
      * device. This is exactly the work eliminated by the zero-copy path. */
@@ -611,14 +620,14 @@ class pl_pass_through {
     auto* in_host = m_in_bo.map<uint8_t*>();
     std::memcpy(in_host, src, nbytes);
     if (padded > nbytes) {
-      std::memset(in_host + nbytes, 0, padded - nbytes); /* zero the tail word */
+      std::memset(in_host + nbytes, 0, padded - nbytes); /* zero the tail beat */
     }
     m_in_bo.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     /* Stage 2 (PL exec): launch the kernel and wait for completion. Argument
      * order matches the kernel signature: (in, out, size). */
     const auto t1 = std::chrono::high_resolution_clock::now();
-    auto run = m_kernel(m_in_bo, m_out_bo, static_cast<int>(nwords));
+    auto run = m_kernel(m_in_bo, m_out_bo, static_cast<int>(nbeats));
     run.wait();
 
     /* Stage 3 (from-PL): sync the result back and copy it to dst. */
@@ -647,7 +656,7 @@ class pl_pass_through {
 
   /**
    * @brief Allocate a persistent PL output bo (gmem1) sized to nbytes (rounded
-   *        up to whole 32-bit words). The caller keeps the bo alive and reads
+   *        up to whole 512-bit beats). The caller keeps the bo alive and reads
    *        the kernel result directly from its host mapping (bo.map()), so no
    *        host copy of the output is needed — this enables output-side
    *        zero-copy in forward_zerocopy_io().
@@ -656,7 +665,7 @@ class pl_pass_through {
    * @return A device bo bound to gmem1, host-mappable via bo.map().
    */
   xrt::bo alloc_output(size_t nbytes) {
-    const size_t need = ((nbytes + 3) / 4) * 4;
+    const size_t need = ((nbytes + kBeatBytes - 1) / kBeatBytes) * kBeatBytes;
     return xrt::bo(m_device, need, m_kernel.group_id(1)); /* gmem1 */
   }
 
@@ -679,13 +688,14 @@ class pl_pass_through {
       return;
     }
 
-    /* pass_through operates on 32-bit words; round the byte count up. */
-    const size_t nwords = (nbytes + 3) / 4;
+    /* pass_through operates on 512-bit (64-byte) beats; round the byte count up
+     * to a whole beat and pass the beat count as the kernel `size` argument. */
+    const size_t nbeats = (nbytes + kBeatBytes - 1) / kBeatBytes;
 
     /* No to-PL stage: the kernel reads the NPU output buffer in place. */
     /* Stage 2 (PL exec): launch the kernel and wait. */
     const auto t1 = std::chrono::high_resolution_clock::now();
-    auto run = m_kernel(in_bo, out_bo, static_cast<int>(nwords));
+    auto run = m_kernel(in_bo, out_bo, static_cast<int>(nbeats));
     run.wait();
 
     /* Stage 3 (from-PL): only a cache sync — the host reads out_bo.map()
@@ -722,9 +732,9 @@ class pl_pass_through {
   }
 
   /* (Re)allocate the device buffers when a larger transfer is requested.
-   * Buffers are sized to whole 32-bit words and reused across calls. */
+   * Buffers are sized to whole 512-bit beats and reused across calls. */
   void ensure_capacity(size_t nbytes) {
-    const size_t need = ((nbytes + 3) / 4) * 4;
+    const size_t need = ((nbytes + kBeatBytes - 1) / kBeatBytes) * kBeatBytes;
     if (need <= m_capacity) {
       return;
     }
@@ -2051,6 +2061,14 @@ class app_context {
       std::cout << "  data-transfer-to-PL      : " << to_pl_ms << std::endl;
       std::cout << "  PL dummy post processing : " << pl_exec_ms << std::endl;
       std::cout << "  data-transfer-from-PL    : " << from_pl_ms << std::endl;
+
+      /* End-to-end total = sum of the four pipeline stages above. This is the
+       * full per-frame latency of the ml_vart_plus_pl datapath (NPU inference
+       * plus the PL forward: input staging + pass_through kernel + result
+       * copy-back), as opposed to the "ML only" headline number. */
+      const double total_ms = ml_ms + to_pl_ms + pl_exec_ms + from_pl_ms;
+      std::cout << "  ------------------------------------" << std::endl;
+      std::cout << "  total (end-to-end)       : " << total_ms << std::endl;
       std::cout.unsetf(std::ios::floatfield);
     }
   }

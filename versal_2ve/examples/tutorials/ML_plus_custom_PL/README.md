@@ -224,12 +224,14 @@ ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
 Example output:
 
 ```
-Average inference time over 100 runs (ML only): 1.38 ms
+Average inference time over 100 runs (ML only): 1.40 ms
 Per-stage average (ms/frame, zero-copy ML->PL):
-  ML inference             : 1.378
+  ML inference             : 1.403
   data-transfer-to-PL      : 0.000
-  PL dummy post processing : 0.327
+  PL dummy post processing : 0.098
   data-transfer-from-PL    : 0.011
+  ------------------------------------
+  total (end-to-end)       : 1.513
 Run completed successfully.
 ```
 
