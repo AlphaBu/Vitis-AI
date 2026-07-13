@@ -50,6 +50,7 @@ The example uses the `pass_through` kernel, which is an **identity copy** kernel
 - [Command-line arguments](#command-line-arguments)
 - [Input / output file layout](#input--output-file-layout)
 - [Troubleshooting](#troubleshooting)
+- [pass_through and DDR link optimizations](#pass_through-and-ddr-link-optimizations)
 - [Related documents](#related-documents)
 
 ---
@@ -633,6 +634,71 @@ All tensors should report `MATCH`. (For a *real* post-processing kernel the byte
 | `xclbin not found` | `pl-config.xclbin-location` path does not exist on the board. |
 | Build error: `load_xclbin` is deprecated | Use the `register_xclbin` + `hw_context` path (see [1.3](#13-write-a-thin-xrt-wrapper-for-the-kernel)). |
 | Outputs `DIFFER` from `ml_vart` | Expected only if you replaced `pass_through` with a non-identity kernel; otherwise check byte counts / word rounding / `sync()` calls. |
+
+---
+
+## pass_through and DDR link optimizations
+
+Beyond the zero-copy ML↔PL transfers ([1.5.1](#151-zero-copy-the-mlpl-transfers-dma-buf-default)),
+two further optimizations widen the PL datapath and remove DDR bank contention so the
+`pass_through` forward adds minimal latency on top of the NPU inference.
+
+### 1. Widen the `pass_through` kernel interface to 512-bit + internal dataflow
+
+The kernel's AXI4 memory-mapped ports are widened from 128-bit to **512-bit**, and the copy
+loop is split into a producer→consumer `dataflow` region (read burst → stream → write burst)
+so reads and writes overlap. A 512-bit interface moves 64 bytes per beat (4× the 128-bit path),
+which maximizes DDR burst efficiency for the large OFM tensors.
+
+On the host side this is a single-constant change in `ml_vart_plus_pl.cpp` — the beat width
+`kBeatBytes` becomes `64` (512 bits / 8). All beat/rounding arithmetic derives from that constant,
+so buffer sizing and the `size` (number of beats) kernel argument follow automatically:
+
+```cpp
+// 512-bit (64-byte) AXI4 data path: pass_through moves whole 512-bit words (beats).
+static constexpr size_t kBeatBytes = 64;
+```
+
+The widened host must be paired with a matching 512-bit kernel in the `.xclbin`.
+
+### 2. Place the kernel's input and output on different DDR banks
+
+By default XRT may connect both `pass_through` ports to the same LPDDR memory controller, so the
+read and write streams contend for one bank's bandwidth. At **system-link** time, pin the input and
+output to **separate** banks so reads and writes run concurrently. Add to the Vitis link
+`system.cfg`:
+
+```ini
+[connectivity]
+  sp=pass_through_1.in:LPDDR01
+  sp=pass_through_1.out:LPDDR23
+```
+
+`pass_through_1.in` reads from the `LPDDR01` bank group while `pass_through_1.out` writes to
+`LPDDR23`, eliminating the shared-bank bottleneck. The host requires no change — each argument's
+bank is discovered at run time via `xrt::kernel::group_id(argno)` when allocating the BOs.
+
+### Measured performance (on board, `--benchmark --runs 100`, zero-copy ML→PL)
+
+With both optimizations in place (512-bit dataflow kernel + split DDR banks):
+
+```text
+Average inference time over 100 runs (ML only): 1.40 ms
+Per-stage average (ms/frame, zero-copy ML->PL):
+  ML inference             : 1.403
+  data-transfer-to-PL      : 0.000
+  PL dummy post processing : 0.098
+  data-transfer-from-PL    : 0.011
+  ------------------------------------
+  total (end-to-end)       : 1.513
+Run completed successfully.
+```
+
+The `pass_through` (PL dummy post processing) stage drops to **0.098 ms/frame** — roughly 3×
+faster than the 128-bit, single-bank baseline (0.327 ms/frame, see [1.5.1](#151-zero-copy-the-mlpl-transfers-dma-buf-default)) — thanks to the wider interface, internal dataflow, and
+contention-free DDR banks. Combined with zero-copy (input transfer = 0.000, output copy-back =
+0.011 ms/frame), the full end-to-end per-frame latency is **1.513 ms**, i.e. the NPU inference
+plus only ~0.11 ms of PL forward overhead.
 
 ---
 
