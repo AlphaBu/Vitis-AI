@@ -246,24 +246,9 @@ goes in the combined ML+PL datapath.
 
 ---
 
-## 8. (Optional) Full‑dataset inference + accuracy
-
-To run ML inference **+ PL inference over an entire dataset** (e.g. COCO), the user
-prepares the input data as the real system would produce it, and post‑processes the PL
-outputs as needed to compute accuracy.
-
-The example provides helper scripts that prepare the ML inference inputs and
-post‑process the PL outputs to compute accuracy end‑to‑end (COCO val2017 mAP for
-YOLOX‑Nano INT8 over `ml_vart_plus_pl_nms` + `nms_onnx`):
-
-- [`../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md`](../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md)
-
----
-
 ## Related documents
 
 - [../../cpp_examples/ml_vart_plus_pl_nms/README.md](../../cpp_examples/ml_vart_plus_pl_nms/README.md) — example host application: VART‑ML + host data‑conversion + `nms_onnx` XRT PL kernel, build, run, verify.
-- [../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md](../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md) — full COCO val2017 accuracy pipeline (input packing → board run → post‑process → mAP).
 - [../../../reference_design/vek385/rev-b](../../../reference_design/vek385/rev-b) — reference design (HW platform, SW, Vitis app build).
 - [../../../reference_design/vek385/rev-a_nms/nms_hls/workarea](../../../reference_design/vek385/rev-a_nms/nms_hls/workarea) — `nms_onnx` HLS PL kernel (source + build Makefile).
 - [../../../skills/vitis-hls-kernel-coding](../../../skills/vitis-hls-kernel-coding) — skill for writing/optimizing Vitis HLS PL kernels.
