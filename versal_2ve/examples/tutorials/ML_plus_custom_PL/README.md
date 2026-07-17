@@ -17,15 +17,17 @@ This tutorial describes the **complete flow** for running inference where the **
 runs on the NPU** (via the VART‑ML API) and a **custom PL (Programmable Logic) kernel**
 runs on the FPGA fabric, with a single host application driving the whole pipeline. It
 ties together the reference design (hardware platform, software, Vitis application build)
-and an example host application (`ml_vart_plus_pl`) that forwards each NPU output tensor
-through a `pass_through` PL kernel.
+and an example host application (`ml_vart_plus_pl_nms`) that runs a YOLOX detection model
+on the NPU, converts the model output on the host into the boxes/scores arrays expected by
+the ONNX NonMaxSuppression operator, and runs a custom `nms_onnx` PL kernel to produce the
+final detections.
 
 The datapath is:
 
 ```
-                 VART-ML (NPU/AIE)                XRT / VART-X (PL)
-   IFM ──────►  vart::Runner::run()  ──►  OFM tensor  ──►  custom PL kernel  ──►  result
-               (device 0, amdxdna)                       (device 1, PL region)
+                 VART-ML (NPU/AIE)              host convert          XRT / VART-X (PL)
+   IFM ──►  vart::Runner::run()  ──►  OFM tensor  ──►  boxes+scores  ──►  nms_onnx kernel  ──►  detections
+            (device 0, amdxdna)                                          (device 1, PL region)
 ```
 
 The ML control (VART‑ML) and the PL control (XRT or VART‑X) live **together in the same
@@ -105,10 +107,9 @@ Vitis-AI/versal_2ve/reference_design/vek385/rev-b/hw/example_design_pfm_extensib
 ```
 
 Each kernel compiles to a `.xo` (e.g. `v++ -c --platform <extensible.xsa> ...`). See the
-`pass_through` kernel for a minimal, self‑contained example (source + its own build
-Makefile):
+`nms_onnx` HLS kernel for a self‑contained example (source + its own build Makefile):
 
-- [`../../../reference_design/vek385/rev-b/pass_through`](../../../reference_design/vek385/rev-b/pass_through)
+- [`../../../reference_design/vek385/rev-a_nms/nms_hls/workarea`](../../../reference_design/vek385/rev-a_nms/nms_hls/workarea)
 
 > **Tip — HLS prototyping kernels.** If you are creating a prototyping kernel with Vitis
 > HLS, you can use the
@@ -144,13 +145,13 @@ stage so they are linked into the design alongside the AIE graph and the built�
 Vitis-AI/versal_2ve/reference_design/vek385/rev-b/vitis_prj/Makefile
 ```
 
-Add each kernel's `.xo` to the `v++` link line. For example (the `pass_through` kernel
-added next to `image_processing`):
+Add each kernel's `.xo` to the `v++` link line. For example (the `nms_onnx` kernel added
+next to `image_processing`):
 
 ```make
 cd $(ABS_PATH)/link; v++ $(XCXX_COMMON_OPTS) --platform $(PLATFORM) \
     --config $(ABS_PATH)/link/system.cfg \
-    -l $(ABS_PATH)/training-libadf.a $(IMAGE_PROCESSING_XO) $(PASS_THROUGH_XO) -o ${PROJECT_NAME}_link.xsa; cd $(ABS_PATH)
+    -l $(ABS_PATH)/training-libadf.a $(IMAGE_PROCESSING_XO) $(NMS_XO) -o ${PROJECT_NAME}_link.xsa; cd $(ABS_PATH)
 ```
 
 Make sure your kernel `.xo` is built before the link step (add a build rule / prerequisite
@@ -182,13 +183,14 @@ Write the host C++ application that drives the pipeline:
 Compile the host code with the installed **SDK** (cross toolchain), producing an AArch64
 ELF for the board.
 
-**Example host application** — a complete, documented reference that runs a VART‑ML model
-and forwards each output tensor through the `pass_through` PL kernel via the native XRT
-C++ API:
+**Example host application** — a complete, documented reference that runs a VART‑ML model,
+converts the NPU output into boxes/scores on the host, and runs the `nms_onnx` PL kernel
+via the native XRT C++ API:
 
-- [`../../cpp_examples/ml_vart_plus_pl/README.md`](../../cpp_examples/ml_vart_plus_pl/README.md)
+- [`../../cpp_examples/ml_vart_plus_pl_nms/README.md`](../../cpp_examples/ml_vart_plus_pl_nms/README.md)
 
-It shows the thin XRT wrapper for a kernel, one‑time kernel init, per‑inference
+It shows the thin XRT wrapper for a kernel, one‑time kernel init, the host data‑conversion
+step (model output → boxes/scores, with the `obj × cls` score computation), per‑inference
 forwarding, the JSON config (`pl-config`), the Makefile `pkg-config` changes for `xrt`,
 and the board run/verify commands. Use it as the starting point for your own host code.
 
@@ -212,33 +214,35 @@ path you will reference from the host app (e.g. `/run/media/mmcblk0p1/x_plus_ml.
 
 Copy the compiled host binary, the model artifact (`.rai`), the input `.bin` file(s), and
 the app‑config JSON to the board, set the runtime library path, and run. (Full details in
-the [example host README](../../cpp_examples/ml_vart_plus_pl/README.md).)
+the [example host README](../../cpp_examples/ml_vart_plus_pl_nms/README.md).)
 
-The example [`ml_vart_plus_pl`](../../cpp_examples/ml_vart_plus_pl) benchmarks the
-**yolox_nano_int8** model together with the **`pass_through` PL kernel**. Example command:
+The example [`ml_vart_plus_pl_nms`](../../cpp_examples/ml_vart_plus_pl_nms) benchmarks the
+**yolox_nano_int8** model together with the **`nms_onnx` PL kernel**. Example command:
 
 ```bash
-ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
+ml_vart_plus_pl_nms --app-config vart_config_plus_pl.json --benchmark --runs 100
 ```
 
 Example output:
 
 ```
-Average inference time over 100 runs (ML only): 1.40 ms
-Per-stage average (ms/frame, zero-copy ML->PL):
-  ML inference             : 1.403
-  data-transfer-to-PL      : 0.000
-  PL dummy post processing : 0.098
-  data-transfer-from-PL    : 0.011
+Average inference time over 100 runs (ML only): 1.76 ms
+Per-stage average (ms/frame):
+  ML inference             : 1.765
+  data-conversion (host)   : 0.691
+  data-transfer-to-PL      : 0.004
+  NMS PL kernel            : 0.222
+  data-transfer-from-PL    : 0.006
   ------------------------------------
-  total (end-to-end)       : 1.513
+  total (end-to-end)       : 2.688
 Run completed successfully.
 ```
 
-The per‑stage breakdown separates the NPU **ML inference**, the **data‑transfer‑to‑PL**
-(host→PL input copy; `0.000` in zero‑copy mode), the **PL dummy post processing** (kernel launch +
-wait), and the **data‑transfer‑from‑PL** (PL output copy→host), so you can see exactly
-where time goes in the combined ML+PL datapath.
+The per‑stage breakdown separates the NPU **ML inference**, the **data‑conversion (host)**
+(model output → boxes/scores arrays, including the `obj × cls` score computation), the
+**data‑transfer‑to‑PL** (host→PL input copy), the **NMS PL kernel** (kernel launch + wait),
+and the **data‑transfer‑from‑PL** (PL output copy→host), so you can see exactly where time
+goes in the combined ML+PL datapath.
 
 ---
 
@@ -250,17 +254,17 @@ outputs as needed to compute accuracy.
 
 The example provides helper scripts that prepare the ML inference inputs and
 post‑process the PL outputs to compute accuracy end‑to‑end (COCO val2017 mAP for
-YOLOX‑Nano INT8 over `ml_vart_plus_pl` + `pass_through`):
+YOLOX‑Nano INT8 over `ml_vart_plus_pl_nms` + `nms_onnx`):
 
-- [`../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md`](../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md)
+- [`../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md`](../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md)
 
 ---
 
 ## Related documents
 
-- [../../cpp_examples/ml_vart_plus_pl/README.md](../../cpp_examples/ml_vart_plus_pl/README.md) — example host application: VART‑ML + XRT PL forwarding, build, run, verify.
-- [../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md](../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md) — full COCO val2017 accuracy pipeline (input packing → board run → post‑process → mAP).
+- [../../cpp_examples/ml_vart_plus_pl_nms/README.md](../../cpp_examples/ml_vart_plus_pl_nms/README.md) — example host application: VART‑ML + host data‑conversion + `nms_onnx` XRT PL kernel, build, run, verify.
+- [../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md](../../cpp_examples/ml_vart_plus_pl_nms/FULL_PIPELINE.md) — full COCO val2017 accuracy pipeline (input packing → board run → post‑process → mAP).
 - [../../../reference_design/vek385/rev-b](../../../reference_design/vek385/rev-b) — reference design (HW platform, SW, Vitis app build).
-- [../../../reference_design/vek385/rev-b/pass_through](../../../reference_design/vek385/rev-b/pass_through) — minimal `pass_through` HLS PL kernel (source + build Makefile).
+- [../../../reference_design/vek385/rev-a_nms/nms_hls/workarea](../../../reference_design/vek385/rev-a_nms/nms_hls/workarea) — `nms_onnx` HLS PL kernel (source + build Makefile).
 - [../../../skills/vitis-hls-kernel-coding](../../../skills/vitis-hls-kernel-coding) — skill for writing/optimizing Vitis HLS PL kernels.
 - Integrated system reference‑design build guide: <https://vitisai.docs.amd.com/projects/gen2/en/latest/docs/integrated_system_reference%20design/build.html>
