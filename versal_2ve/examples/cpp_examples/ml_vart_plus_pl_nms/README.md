@@ -83,7 +83,7 @@ To **build** you need:
 To **run on the board** you need:
 
 - A VEK385 board booted with the platform image, network reachable.
-- A compiled model artifact (`.rai`) or model cache directory, and matching input `.bin` files.
+- A model file — an ONNX model (`.onnx`), a compiled artifact (`.rai`), or a model cache directory — and matching input `.bin` files. The examples below use `integrated_model.onnx` (a YOLOX detector whose head post-processing is folded into the graph; single output `[1, 6300, 7]` = `[cx, cy, w, h, obj, cls0, cls1]`, `num_classes = 2`).
 - An `.xclbin` on the board that contains the `nms_onnx` PL kernel. On the VEK385 reference design this is the combined `x_plus_ml.xclbin` (which also carries the AIE/ML overlay). See the [`nms_hls` kernel](../../../reference_design/vek385/rev-a_nms/nms_hls) and the VEK385 reference-design Vitis flow for building the `.xclbin`.
 
 ---
@@ -482,7 +482,7 @@ You need four things on the board:
 | Item                         | Example board path                                             |
 | ---------------------------- | ------------------------------------------------------------- |
 | The `ml_vart_plus_pl` binary | `/home/root/ml_vart_plus_pl`                                  |
-| The compiled model (`.rai`)  | `<design>/yolox_nano_onnx_pt_regular_conv_all/....rai`        |
+| The model file (`.onnx`/`.rai`) | `<design>/integrated_model.onnx`                           |
 | The input `.bin` file(s)     | `<design>/inputSubBO_..._trim.bin`                            |
 | The app-config JSON          | `<design>/vart_config_plus_pl.json`                           |
 
@@ -570,7 +570,7 @@ All commands below assume you `cd` into the design directory (so the relative `m
 - **Inspect model metadata** (no inference) — prints the CPU + HW tensor view and dumps `<model_basename>_info.json`. Use it to look up the input tensor `name`s needed for `ifms-config` and to confirm the output stride:
 
   ```bash
-  ml_vart_plus_pl --get-model-info yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai
+  ml_vart_plus_pl --get-model-info integrated_model.onnx
   ```
 
 ### 3.6 Verify correctness

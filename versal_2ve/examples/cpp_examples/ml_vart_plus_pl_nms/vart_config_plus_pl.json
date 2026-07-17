@@ -1,6 +1,6 @@
 {
     "inference-config": {
-        "model-file": "yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai",
+        "model-file": "integrated_model/integrated_model.onnx",
         "runner-options": {
             "log-level": "WARNING",
             "ai-analyzer-profiling": false
@@ -8,7 +8,7 @@
     },
     "ifms-config": [
         {
-            "name": "onnx::DequantizeLinear_229",
+            "name": "/backbone/_actq_0/QuantizeLinear_output_0",
             "file": "inputSubBO_vaiml_par_0_id_0_0_0_trim.bin"
         }
     ],
