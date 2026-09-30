@@ -180,7 +180,7 @@ if __name__ == "__main__":
 ---
 
 > **Workflow summary:**
-> - **Compilation** (`compile.py`) runs on the **host machine inside the Docker container** released as part of this package. For Docker setup instructions, refer to [UG1787 — Docker Setup](https://docs.amd.com/r/en-US/ug1787). Note that model compilation may take several minutes depending on the model size and host machine performance.
+> - **Compilation** (`compile.py`) runs on the **host machine inside the Docker container** released as part of this package. For Docker setup instructions, refer to the [Vitis AI User Guide for Versal AI Edge Series Gen 2](https://vitisai.docs.amd.com/projects/gen2/en/latest/docs/setup_and_installation/docker-setup.html). Note that model compilation may take several minutes depending on the model size and host machine performance.
 > - **Inference** (`vart_multi_tenancy`) runs on the **AMD Versal™ AI Edge Series Gen 2 VEK385 Evaluation Kit** (VEK385). Copy the compiled model caches (`my_cache/`) and runtime config JSONs (`json_configs/`) to the board before running. To keep the model running for an extended period — for example when observing NPU column occupation with `xrt-smi` — use the `-r` / `--runs` option (e.g. `-r 10000`).
 
 > **Note:** This tutorial targets the **VEK385 evaluation kit**, which has **36 NPU columns** (2VE3858). The same concepts and workflow apply directly to other devices with fewer columns — for example **24 columns** (2VE3558) or **8 columns** (2VE3358). Simply adjust the `dp_size`, `tp_size`, and `start_column` values to fit the column count available on your target device.
@@ -268,7 +268,7 @@ vart_multi_tenancy --config json_configs/resnet50_dp1tp1_config.json --log-level
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/resnet50_dp1tp1_config.json --log-level 0
+vart_multi_tenancy --config json_configs/resnet50_dp1tp1_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 32 : Model_1
 ================================================
@@ -279,7 +279,7 @@ Start Column | Models executed | OFMs file saved
 -------------+-----------------+---------------------------------------------------------
 32 (shared)  | Model_1         | ./out_resnet50_dp1tp1/ofm_model_1/output_1x1000_int8.bin
 -------------+-----------------+---------------------------------------------------------
-root@amd-edf:/home/amd-edf/rk/multi_tenancy# ./vart_multi_tenancy --config json_configs/resnet50_dp1tp1_config.json --log-level 0
+vart_multi_tenancy --config json_configs/resnet50_dp1tp1_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 32 : Model_1
 ================================================
@@ -295,10 +295,10 @@ Start Column | Models executed | OFMs file saved
 To verify which NPU columns the model has occupied, use the `xrt-smi examine` utility. Run it before and during inference to observe the partition being claimed. Before inference, no hardware contexts are active:
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
   No hardware contexts running on device
@@ -307,26 +307,26 @@ AIE Partitions
 While the model is running, the partition shows columns 32 to 35 occupied:
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [32, 33, 34, 35]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1238                |1          |991         |0           |0    |Normal   |
-      |N/A                 |Idle       |990         |0           |     |1        |
-      |29228 KB            |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1238                |1          |991         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |990         |0           |0          |     |1        |
+      |29228 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 
 ---
@@ -406,7 +406,7 @@ vart_multi_tenancy --config json_configs/resnet50_dp1tp4_config.json --log-level
 
 #### Results
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/resnet50_dp1tp4_config.json --log-level 0
+vart_multi_tenancy --config json_configs/resnet50_dp1tp4_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 0 : Model_1
 ================================================
@@ -417,32 +417,29 @@ Start Column | Models executed | OFMs file saved
 -------------+-----------------+---------------------------------------------------------
 0 (shared)   | Model_1         | ./out_resnet50_dp1tp4/ofm_model_1/output_1x1000_int8.bin
 -------------+-----------------+---------------------------------------------------------
-
-root@amd-edf:/home/amd-edf/test/multitenancy#
 ```
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1351                |1          |657         |0           |0    |Normal   |
-      |N/A                 |Idle       |656         |0           |     |1        |
-      |32412 KB            |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
-root@amd-edf:~#
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1351                |1          |657         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |656         |0           |0          |     |1        |
+      |32412 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 
 ---
@@ -523,7 +520,7 @@ vart_multi_tenancy --config json_configs/resnet50_dp4tp1_config.json --log-level
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/resnet50_dp4tp1_config.json --log-level 0
+vart_multi_tenancy --config json_configs/resnet50_dp4tp1_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 0 : Model_1
 ================================================
@@ -536,9 +533,6 @@ Start Column | Models executed | OFMs file saved
 -------------+-----------------+---------------------------------------------------------
 
 ```
-
-<!-- TODO: Paste xrt-smi column occupation output here -->
-
 
 ### Case 4 — Data Parallelism = 2 & Tensor Parallelism = 2
 
@@ -616,7 +610,7 @@ vart_multi_tenancy --config json_configs/resnet50_dp2tp2_config.json --log-level
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf# vart_multi_tenancy --config json_configs/resnet50_dp2tp2_config.json --log-level 0
+vart_multi_tenancy --config json_configs/resnet50_dp2tp2_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 16 : Model_1
 ================================================
@@ -631,26 +625,26 @@ Start Column | Models executed | OFMs file saved
 ```
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |Layer Evts  |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |            |     |FPS      |
-      |                    |           |            |            |            |     |Latency  |
-      |====================|===========|============|============|============|=====|=========|
-      |918                 |1          |149         |0           |0           |0    |Normal   |
-      |N/A                 |Idle       |148         |0           |0           |     |1        |
-      |33052 KB            |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |918                 |1          |149         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |148         |0           |0          |     |1        |
+      |33052 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 ---
 
@@ -697,7 +691,7 @@ vart_multi_tenancy --config json_configs/yoloxm_dp1tp1_config.json --log-level 0
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/yoloxm_dp1tp1_config.json --log-level 0
+vart_multi_tenancy --config json_configs/yoloxm_dp1tp1_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 32 : Model_1
 ================================================
@@ -714,10 +708,10 @@ Start Column | Models executed | OFMs file saved
 Before inference, no hardware contexts are active:
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
   No hardware contexts running on device
@@ -726,26 +720,26 @@ AIE Partitions
 While the model is running, the partition shows columns 32 to 35 occupied:
 
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [32, 33, 34, 35]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1238                |1          |991         |0           |0    |Normal   |
-      |N/A                 |Idle       |990         |0           |     |1        |
-      |29228 KB            |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1238                |1          |991         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |990         |0           |0          |     |1        |
+      |29228 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 
 ---
@@ -789,7 +783,7 @@ vart_multi_tenancy --config json_configs/yoloxm_dp1tp4_config.json --log-level 0
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/yoloxm_dp1tp4_config.json --log-level 0
+vart_multi_tenancy --config json_configs/yoloxm_dp1tp4_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 0 : Model_1
 ================================================
@@ -803,27 +797,26 @@ Start Column | Models executed | OFMs file saved
 ```
 
 ```console
-root@amd-edf:~# xrt-smi examine -d 0 -r aie-partitions
+xrt-smi examine -d 0 -r aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |899                 |1          |1040        |0           |0    |Normal   |
-      |N/A                 |Idle       |1039        |0           |     |1        |
-      |43968 KB            |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
-root@amd-edf:~#
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |899                 |1          |1040        |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |1039        |0           |0          |     |1        |
+      |43968 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 
 ---
@@ -869,7 +862,7 @@ vart_multi_tenancy --config json_configs/yoloxm_dp4tp1_config.json --log-level 0
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf/test/multitenancy# vart_multi_tenancy --config json_configs/yoloxm_dp4tp1_config.json --log-level 0
+vart_multi_tenancy --config json_configs/yoloxm_dp4tp1_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 0 : Model_1
 ================================================
@@ -881,8 +874,6 @@ Start Column | Models executed | OFMs file saved
 0 (shared)   | Model_1         | ./out_yoloxm_dp4tp1/ofm_model_1/output_1x8400x88_int8.bin
 -------------+-----------------+----------------------------------------------------------
 ```
-
-<!-- TODO: Paste xrt-smi column occupation output here -->
 
 ---
 
@@ -929,7 +920,7 @@ vart_multi_tenancy --config json_configs/yoloxm_dp2tp2_config.json --log-level 0
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf# vart_multi_tenancy --config json_configs/yoloxm_dp2tp2_config.json --log-level 0
+vart_multi_tenancy --config json_configs/yoloxm_dp2tp2_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 16 : Model_1
 ================================================
@@ -942,26 +933,26 @@ Start Column | Models executed | OFMs file saved
 -------------+-----------------+----------------------------------------------------------
 ```
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |Layer Evts  |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |            |     |FPS      |
-      |                    |           |            |            |            |     |Latency  |
-      |====================|===========|============|============|============|=====|=========|
-      |1000                |1          |183         |0           |0           |0    |Normal   |
-      |N/A                 |Idle       |182         |0           |0           |     |1        |
-      |57356 KB            |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1000                |1          |183         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |182         |0           |0          |     |1        |
+      |57356 KB            |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 ---
 
@@ -1084,7 +1075,7 @@ vart_multi_tenancy --config json_configs/multi_tenancy_config.json --log-level 0
 #### Results
 
 ```console
-root@amd-edf:/home/amd-edf# vart_multi_tenancy --config json_configs/multi_tenancy_config.json --log-level 0
+vart_multi_tenancy --config json_configs/multi_tenancy_config.json --log-level 0
 ========== Overlay Column Assignments ==========
   start_column 0 : Model_1, Model_2, Model_3
   start_column 16 : Model_4, Model_5, Model_6
@@ -1118,66 +1109,66 @@ Avg inference  : Total inference time divided by Total Runs.
 
 ```
 ```console
-root@amd-edf:~# xrt-smi examine --device 0 --report aie-partitions
+xrt-smi examine --device 0 --report aie-partitions
 
 ---------------------------
-[0000:00:00.0] : Telluride
+[0000:00:00.0] : AMD Versal Prime Gen2
 ---------------------------
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |Layer Evts  |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |            |     |FPS      |
-      |                    |           |            |            |            |     |Latency  |
-      |====================|===========|============|============|============|=====|=========|
-      |1126                |1          |200         |0           |0           |0    |Normal   |
-      |N/A                 |Active     |200         |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
-      |1126                |2          |100         |0           |0           |0    |Normal   |
-      |N/A                 |Active     |100         |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |1          |200         |0           |0          |0    |Normal   |
+      |N/A                 |Active     |200         |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |2          |100         |0           |0          |0    |Normal   |
+      |N/A                 |Active     |100         |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
   Partition Index   : 1
     Columns: [16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |Layer Evts  |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |            |     |FPS      |
-      |                    |           |            |            |            |     |Latency  |
-      |====================|===========|============|============|============|=====|=========|
-      |1126                |3          |49          |0           |0           |0    |Normal   |
-      |N/A                 |Idle       |48          |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
-      |1126                |4          |141         |0           |0           |0    |Normal   |
-      |N/A                 |Idle       |139         |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |3          |49          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |48          |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |4          |141         |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |139         |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
   Partition Index   : 2
     Columns: [32, 33, 34, 35]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |Layer Evts  |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |            |     |FPS      |
-      |                    |           |            |            |            |     |Latency  |
-      |====================|===========|============|============|============|=====|=========|
-      |1126                |5          |200         |0           |0           |0    |Normal   |
-      |N/A                 |Active     |200         |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
-      |1126                |6          |93          |0           |0           |0    |Normal   |
-      |N/A                 |Idle       |92          |0           |0           |     |1        |
-      |348 MB              |N/A        |            |            |            |     |1        |
-      |                    |           |            |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |5          |200         |0           |0          |0    |Normal   |
+      |N/A                 |Active     |200         |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1126                |6          |93          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |92          |0           |0          |     |1        |
+      |348 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 
 ```

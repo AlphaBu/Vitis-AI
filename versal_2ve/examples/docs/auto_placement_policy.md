@@ -110,61 +110,61 @@ The example below shows the expected output for the six models in Example 2. Thr
 
 ```
 AIE Partitions
-  Total Memory Usage: N/A
+  Total NPU Memory Usage: N/A
   Partition Index   : 0
     Columns: [0, 1, 2, 3]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1213                |1          |39          |0           |0    |Normal   |
-      |N/A                 |Idle       |38          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
-      |1213                |6          |41          |0           |0    |Normal   |
-      |N/A                 |Idle       |40          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |1          |39          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |38          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |6          |41          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |40          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
   Partition Index   : 1
     Columns: [4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1213                |2          |46          |0           |0    |Normal   |
-      |N/A                 |Idle       |45          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
-      |1213                |5          |44          |0           |0    |Normal   |
-      |N/A                 |Idle       |43          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |2          |46          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |45          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |5          |44          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |43          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
   Partition Index   : 2
     Columns: [28, 29, 30, 31, 32, 33, 34, 35]
     HW Contexts:
-      |PID                 |Ctx ID     |Submissions |Migrations  |Err  |Priority |
-      |Process Name        |Status     |Completions |Suspensions |     |GOPS     |
-      |Memory Usage        |Instr BO   |            |            |     |FPS      |
-      |                    |           |            |            |     |Latency  |
-      |====================|===========|============|============|=====|=========|
-      |1213                |3          |52          |0           |0    |Normal   |
-      |N/A                 |Idle       |51          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
-      |1213                |4          |50          |0           |0    |Normal   |
-      |N/A                 |Idle       |49          |0           |     |1        |
-      |106 MB              |N/A        |            |            |     |1        |
-      |                    |           |            |            |     |2000     |
-      |--------------------|-----------|------------|------------|-----|---------|
+      |PID                 |Ctx ID     |Submissions |Migrations  |Frame Evts |Err  |Priority |
+      |Process Name        |Status     |Completions |Suspensions |Layer Evts |     |GOPS     |
+      |NPU Memory Usage    |Instr BO   |            |            |           |     |FPS      |
+      |                    |           |            |            |           |     |Latency  |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |3          |52          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |51          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
+      |1213                |4          |50          |0           |0          |0    |Normal   |
+      |N/A                 |Idle       |49          |0           |0          |     |1        |
+      |106 MB              |N/A        |            |            |           |     |1        |
+      |                    |           |            |            |           |     |2000     |
+      |--------------------|-----------|------------|------------|-----------|-----|---------|
 ```
 
 Reading the output:

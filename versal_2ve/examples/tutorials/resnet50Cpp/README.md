@@ -15,7 +15,7 @@ The process begins with getting the resnet50 model from HuggingFace ONNX Model Z
 
 This tutorial requires:
 
-* Latest Vitis AI Docker for Versal AI Edge Series Gen 2:
+* Vitis AI Docker for Versal AI Edge Series Gen 2:
   * Instructions for installation and startup are in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 * VEK385 evaluation kit:
   * Setup instructions are available in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
@@ -62,8 +62,14 @@ cd ..
 chmod -R a+w resnet50Cpp
 ```
 
-Load the latest docker image and launch it as explained in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
+Refer to the [Vitis AI User Guide for Versal AI Edge Series Gen 2](https://vitisai.docs.amd.com/projects/gen2/en/latest/docs/setup_and_installation/docker-setup.html) to load and start docker:
 
+```bash
+docker run -it --network host \
+  -v /path/to/your/license:/usr/licenses \
+  -v $PWD/resnet50Cpp:/resnet50Cpp \
+  --rm <REPOSITORY>:<TAG> "bash"
+```
 ### Model Compilation
 
 Compile the resnet50 ONNX model `models/resnet50-v1-12.onnx` for the NPU.
@@ -145,9 +151,8 @@ You can get more details about the compilation results by displaying the content
 ```TEXT
 --------- Final Summary of VAIML Pass ----------
 OS: Linux X64
-VAIP commit: d8989815f577491df76b036d70e3a49dc0298834
 Model: /resnet50Cpp/models/resnet50-v1-12.onnx
-Model signature: b22a4def363ba60ead114db2dbfe6dd0
+Model signature: ......
 Device: ve2-xc2ve3858
 Model data type: float32
 Device data type: bfloat16
@@ -188,7 +193,7 @@ The sysroot provides the cross-compilation environment and libraries required to
 
 ```BASH
 # Copy the SDK installer to a temporary location.
-cp vitis_ai_2ve_sdk_v6.2.sh /tmp/sdk.sh
+cp <vitis_ai_2ve_sdk>.sh /tmp/sdk.sh
 
 # Make the installer executable.
 chmod +x /tmp/sdk.sh
@@ -256,14 +261,14 @@ python3 runhelper.py
 The output should look like:
 
 ```TEXT
-I20250529 18:50:23.824052   958 stat.cpp:193] [Vitis AI EP] No. of Operators :
-I20250529 18:50:23.824097   958 stat.cpp:204]  VAIML   122 
-I20250529 18:50:23.824107   958 stat.cpp:213] 
-I20250529 18:50:23.824115   958 stat.cpp:218] [Vitis AI EP] No. of Subgraphs :
-I20250529 18:50:23.824122   958 stat.cpp:226]    NPU     1 
-I20250529 18:50:23.824127   958 stat.cpp:229] Actually running on NPU      1
-I20250529 18:50:23.825973   958 vitisai_compile_model.cpp:1477] AVG CPU Usage 3.97351%
-I20250529 18:50:23.826004   958 vitisai_compile_model.cpp:1478] Peak Working Set size 109.703 MB
+...... stat.cpp:...] [Vitis AI EP] No. of Operators :
+...... stat.cpp:...]  VAIML   122 
+...... stat.cpp:...] 
+...... stat.cpp:...] [Vitis AI EP] No. of Subgraphs :
+...... stat.cpp:...]    NPU     1 
+...... stat.cpp:...] Actually running on NPU      1
+...... vitisai_compile_model.cpp:...] AVG CPU Usage ......%
+...... vitisai_compile_model.cpp:...] Peak Working Set size ...... MB
 ```
 
 ### AI Analyzer view
@@ -295,7 +300,7 @@ Once the JSON files are generated, launch AI Analyzer.
 docker run -it -p 8011:8011 --network host \
   -v /path/to/your/license:/usr/licenses \
   -v $PWD/resnet50Cpp:/resnet50Cpp \
-  --rm vitis_ai_2ve_docker:release_v6.2 "bash"
+  --rm <REPOSITORY>:<TAG> "bash"
 ```
 
 Inside docker, launch AI Analyzer:
@@ -308,13 +313,13 @@ After the above step, there will be a message like:
 
 ```BASH
 Loaded ONNX model from /resnet50Cpp/vek385_cache_dir/resnet50-v1-12/vaiml_partition_fe.flexml/vaiml_optimized.onnx
-2026-02-19 14:27:03,927     INFO [client_id=n/a] 134292084618944 server.py:35 AI Analyzer 1.7.0.dev20260130181427+g301504b8 serving on http://0.0.0.0:8011/dashboard?token=9a78MONMv8unkzAnkNNcJZ9OepfpuaFXphYsVxuvA (Press CTRL+C to quit)
+AI Analyzer serving on http://0.0.0.0:8011/dashboard?token=<token-from-aianalyzer> (Press CTRL+C to quit)
 ```
 
 In the host machine, start a browser and type the address from above message:
 
 ```BASH
-http://0.0.0.0:8011/dashboard?token=9a78MONMv8unkzAnkNNcJZ9OepfpuaFXphYsVxuvA
+http://0.0.0.0:8011/dashboard?token=<token-from-aianalyzer>
 ```
 
 In AI Analyzer you have access to various tabs with information about the model, its partitions, profiling and visualization data. 
@@ -329,8 +334,7 @@ After running the model on hardware, you can access `PERFORMANCE` views with `Su
 
 ![Performance Timeline](images/PerformanceTimeline.png)
 
-In this screenshot we can also view in parallel the timeline and the ``Mapped Graph`` to understand the relationship between layers in the model and the activities on the timeline. 
-
+In this screenshot we can also view in parallel the timeline and the ``Mapped Graph`` to understand the relationship between layers in the model and the activities on the timeline.
 
 ### Summary
 
@@ -347,5 +351,5 @@ This tutorial demonstrated the complete workflow for deploying resnet50 on the V
 
 The MIT License (MIT)
 
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 

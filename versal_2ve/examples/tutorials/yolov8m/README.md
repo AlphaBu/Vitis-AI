@@ -1,12 +1,7 @@
-<table class="sphinxhide" width="100%">
- <tr width="100%">
-    <td align="center"><img src="https://raw.githubusercontent.com/Xilinx/Image-Collateral/main/xilinx-logo.png" width="30%"/><h1> YOLOv8m Object Detection: Quantization to Deployment</h1>
-    </td>
- </tr>
-</table>
+# YOLOv8m Object Detection: Quantization to Deployment
 
 This tutorial outlines the essential steps for deploying the YOLOv8m model on AMD Versal AI Edge Series Gen 2 VEK385 Evaluation Kit
-using Vitis AI 6.2, while leveraging the mixed-precision capabilities of the Vitis AI compiler.
+using Vitis AI, while leveraging the mixed-precision capabilities of the Vitis AI compiler.
 The process begins with using AMD Quark to quantize the model into an INT8 format, employing the 
 VINT8 configuration. During the compilation phase, the Vitis AI compiler automatically converts 
 the FP32 tail section of the ONNX model to BF16. This conversion is crucial as it ensures that the 
@@ -19,7 +14,7 @@ for ONNX Runtime, ensuring robust and seamless operation on the VEK385 evaluatio
 
 This tutorial requires:
 
-* Latest Vitis AI Docker for Versal AI Edge Series Gen 2:
+* Vitis AI Docker for Versal AI Edge Series Gen 2:
     * Instructions for installation and startup are in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
 * VEK385 evaluation kit (see above):
     * Setup instructions are available in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
@@ -36,7 +31,7 @@ You will:
 - Download YOLOv8m model from Ultralytics and export it to ONNX (Optset 17)
 - Quantize the model to `VINT8` using AMD Quark Quantization API. 
 - Compile and Run Inference on VEK385 NPU using AMD Vitis AI Execution Provider
-- Acheive maximum operator offloading on VEK385 NPU 
+- Achieve maximum operator offloading on VEK385 NPU 
 - Analyse NPU Inference time for model performance
 - Evaluate the model accuracy on VEK385-NPU
 - Deploy compiled model and run end-to-end inference on the VEK385 NPU using Vitis AI Runtime (VART)
@@ -52,8 +47,14 @@ Before starting Docker, adjust the access permissions of the working directories
 chmod -R a+w <path/to/yolov8m>
 ```
 
-Load the latest docker image and launch it as explained in the Vitis AI User Guide for Versal AI Edge Series Gen 2.
+Refer to the [Vitis AI User Guide for Versal AI Edge Series Gen 2](https://vitisai.docs.amd.com/projects/gen2/en/latest/docs/setup_and_installation/docker-setup.html) to load and start docker:
 
+```
+docker run -it --network host \
+  -v /path/to/your/license:/usr/licenses \
+  -v $PWD/yolov8m:/yolov8m \
+  --rm <REPOSITORY>:<TAG> "bash"
+```
 
 ### Install Required Python Packages
 
@@ -182,6 +183,12 @@ After quantization finishes, compile the model.
 ### Model Compilation
 Compile the above VINT8 ONNX model ``models/yolov8m_VINT8_skipNodes.onnx`` for the NPU.
 
+```bash
+python3 compile.py
+```
+
+The compilation uses the following configuration:
+
 ```
 provider_options_dict = {
         "config_file": "vitisai_config.json",
@@ -204,9 +211,8 @@ For compilation summary, see `final-vaiml-pass-summary.txt` inside compiled `cac
 ```
 --------- Final Summary of VAIML Pass ----------
 OS: Linux X64
-VAIP commit: 82e73fd582c8c270490c80d52cd614683e52a7bc
 Model: /yolov8_compile/models/yolov8m_VINT8_skipNodes.onnx
-Model signature: 8af99e1407bdf6b1f6c788c045433855
+Model signature: ......
 Device: ve2
 Model data type: float32 and int8 quantized
 Device data type: bfloat16 and int8
@@ -308,7 +314,7 @@ Use ``evaluate.py`` script to run evaluation on 5k COCO dataset. The python scri
 * ``cpu-int8-fp32``: To evaluate VINT8-FP32 quantized ONNX model on CPU using ``CPUExecutionProvider``
 
     ```bash
-    python3 evaluate.py --model models/yolov8m_VINT8_skipNodes.onnx --coco_dataset datasets/coco --device cpu-int8
+    python3 evaluate.py --model models/yolov8m_VINT8_skipNodes.onnx --coco_dataset datasets/coco --device cpu-int8-fp32
     ```
 
 * ``npu-bf16``: To evaluate Vitis AI compiled BF16 model on VEK385 NPU using ``VitisAIExecutionProvider`` provided appropriate ``--cache_dir`` and ``--cache_key``
@@ -344,30 +350,30 @@ Use ``evaluate.py`` script to run evaluation on 5k COCO dataset. The python scri
 <tr>
 <td>FP32 CPU</td>
 <td>Original FP32 ONNX model, evaluation on CPU</td>
-<td style="text-align: center">48.0843</td>
-<td style="text-align: center">65.1921</td>
-<td style="text-align: center">51.6791</td>
-</tr>
-<tr>
-<td>VINT8-FP32 CPU</td>
-<td>FP32 model quantized to VINT8 with VINT8 head and FP32 tail, evaluation on CPU</td>
-<td style="text-align: center">46.7227</td>
-<td style="text-align: center">64.4694</td>
-<td style="text-align: center">50.5399</td>
+<td style="text-align: center">49.95</td>
+<td style="text-align: center">67.02</td>
+<td style="text-align: center">53.97</td>
 </tr>
 <tr>
 <td>BF16 NPU</td>
 <td>FP32 ONNX model compiled to BF16, evaluation on VEK385 NPU</td>
-<td style="text-align: center">46.1114</td>
-<td style="text-align: center">63.9787</td>
-<td style="text-align: center">49.8143</td>
+<td style="text-align: center">50.29</td>
+<td style="text-align: center">67.66</td>
+<td style="text-align: center">54.65</td>
+</tr>
+<tr>
+<td>VINT8-FP32 CPU</td>
+<td>FP32 model quantized to VINT8 with VINT8 head and FP32 tail, evaluation on CPU</td>
+<td style="text-align: center">48.75</td>
+<td style="text-align: center">66.28</td>
+<td style="text-align: center">53.12</td>
 </tr>
 <tr>
 <td>VINT8-BF16 NPU</td>
 <td>VINT8-FP32 quantized model compiled to VINT8-BF16, evaluation on VEK385 NPU</td>
-<td style="text-align: center">44.0326</td>
-<td style="text-align: center">62.3832</td>
-<td style="text-align: center">47.7017</td>
+<td style="text-align: center">48.38</td>
+<td style="text-align: center">66.12</td>
+<td style="text-align: center">52.68</td>
 </tr>
 </tbody>
 </table>         
@@ -408,7 +414,7 @@ Once the JSON files are generated, launch AI Analyzer using steps below.
 docker run -it -p 8011:8011 --network host \
   -v /path/to/your/license:/usr/licenses \
   -v $PWD/yolov8m:/yolov8m \
-  --rm vitis_ai_2ve_docker:release_v6.2 "bash"
+  --rm <REPOSITORY>:<TAG> "bash"
 ```
 - Inside docker:
 
@@ -417,11 +423,11 @@ aianalyzer <model execution path> --port 8011 --no-browser --bind 0.0.0.0
 ```
 - After above step, there will be message like:
 ```
-2025-12-17 06:02:39,809 INFO [client_id=n/a] 140172386235968 server.py:35 AI Analyzer 1.6.0.dev20251005221519+g1ea47349 serving on http://0.0.0.0:8011/dashboard?token=ZYkcJHumcLcVdqGsFKto4Ck7xQIo08I5BhbJMggHIY (Press CTRL+C to quit)
+AI Analyzer serving on http://0.0.0.0:8011/dashboard?token=<token-from-aianalyzer> (Press CTRL+C to quit)
 ```
 - In the host machine, start a browser and type the address from above message:
 ```
-http://0.0.0.0:8011/dashboard?token=ZYkcJHumcLcVdqGsFKto4Ck7xQIo08I5BhbJMggHIY
+http://0.0.0.0:8011/dashboard?token=<token-from-aianalyzer>
 ```
 AI Analyzer GUI looks like below:
 
@@ -440,7 +446,7 @@ For details on launching AI Analyzer inside docker, see AI Analyzer section of V
 
 ### Using Vitis AI Runtime (VART)
 
-As seen above, the total inference time using the ONNX Runtime Execution Provider is **22.757ms**. By switching to VART, this inference time can be reduced to **16.545 ms**. 
+As seen above, the total inference time using the ONNX Runtime Execution Provider is **23.363ms**. By switching to VART, this inference time can be reduced to **10.619 ms**. 
 VART offloads computation directly to the NPU with minimal CPU involvement, delivering more efficient end-to-end performance compared to ONNX Runtime.
 
 VART is a runtime environment designed for high-efficiency AI model inference on NPU hardware with minimal CPU overhead, and is used for precise end-to-end performance measurement.
@@ -475,7 +481,7 @@ The JSON file contains an object that describes the configuration for a single m
   },
   "ifms-config": [
     {
-      "name": "ifm0",
+      "name": "images_QuantizeLinear_Output",
       "file": "input_vart/test_image_int8.bin"
     }
   ],
@@ -489,19 +495,11 @@ Follow the Vitis AI User Guide for Versal AI Edge Series Gen 2 to boot the VEK38
 
 **Copy Overlays**
 
-Copy the overlay files provided as part of the AMD board package:
-
-- Mount the host NFS export on the target:
-
-```bash
-sudo mount -t nfs 10.10.70.101:/exports/root /mnt
-```
-
-- Copy the overlay files into the target overlay directory:
+Copy the overlay files provided as part of the AMD board package onto the target (see the Vitis AI User Guide for Versal AI Edge Series Gen 2 for the package location):
 
 ```bash
 sudo mkdir -p /overlay
-sudo cp -r /mnt/overlay/* /overlay/
+sudo cp -r <path-to-board-package>/overlay/* /overlay/
 ```
 
 **Program PL + AI Engine Overlay**
@@ -509,7 +507,7 @@ sudo cp -r /mnt/overlay/* /overlay/
 Program the PL + AI Engine overlay PDI and DTB:
 
 ```bash
-sudo fpgautil -b /overlay/vpl_gen_fixed_pld.pdi -o /overlay/pl_aiarm.dtbo
+sudo fpgautil -b /overlay/x_plus_ml.pdi -o /overlayx_plus_ml.dtbo
 ```
 
 **Copy Configuration Files**
@@ -533,7 +531,6 @@ Before running the application on the board, configure the required environment 
 ```bash
 echo 1 > /sys/module/rcupdate/parameters/rcu_cpu_stall_suppress
 export XRT_AIARM=true
-export LD_LIBRARY_PATH=/usr/lib/python3.12/site-packages/voe/lib/:/usr/lib/python3.12/site-packages/flexmlrt/lib/
 export XLNX_ENABLE_CACHE=0
 export XRT_ELF_FLOW=1
 ```
@@ -547,13 +544,22 @@ ml_vart --app-config ml_vart_config.json
 For 100 runs: 
 
 ```bash
-ml_vart --app-config ml_vart_config.json --runs 100
+ml_vart --app-config ml_vart_config.json --benchmark --runs 100
 ```
 
 Expected console output:
 
 ```bash
-Wrote tensor 0 data for frames 0-0 to file: "output_vart/infer_out0-bf16_1x84x8400_output0.bin"
+Running the inference for 100 runs
++------------------------+--------------------------------+
+|                       Performance                       |
++------------------------+--------------------------------+
+| Metric                 | Value                          |
++------------------------+--------------------------------+
+| Average Inference Time | 10.69 ms/inference (dp_size=1) |
+|------------------------|--------------------------------|
+| Average Throughput     | 93.50 FPS                      |
++------------------------+--------------------------------+
 Run completed successfully.
 ```
 
@@ -587,4 +593,4 @@ This tutorial demonstrated the complete workflow for deploying YOLOv8m object de
 
 The MIT License (MIT)
 
-Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.

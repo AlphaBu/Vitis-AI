@@ -1,6 +1,6 @@
 ## Vitis X+ML application build for VEK385
 
-**X+ML** — PL/VART-X vision pipeline interface plus AI Engine ML inference; see [examples glossary](../../../examples/docs/glossary.md#amd-software-stacks).
+**X+ML** — PL/VART-X vision pipeline interface plus AI Engine ML inference; see [examples glossary](../../../../examples/docs/glossary.md#amd-software-stacks).
 
 ## Copyright and license statement
 
@@ -17,7 +17,7 @@ To build the Vitis application, ensure that the required platform is available i
 
 Before building, source the Vitis environment (if not already sourced):
 ```
-source <VITIS_INSTALL_PATH>/2025.2/Vitis/settings64.sh
+source <VITIS_INSTALL_PATH>/2026.1/Vitis/settings64.sh
 ```
 
 Building this Vitis application generates:
