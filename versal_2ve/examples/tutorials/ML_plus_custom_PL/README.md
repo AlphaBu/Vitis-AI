@@ -110,6 +110,12 @@ Makefile):
 
 - [`../../../reference_design/vek385/rev-b/pass_through`](../../../reference_design/vek385/rev-b/pass_through)
 
+To build:
+
+```
+make compile
+```
+
 > **Tip — HLS prototyping kernels.** If you are creating a prototyping kernel with Vitis
 > HLS, you can use the
 > [`vitis-hls-kernel-coding`](../../../skills/vitis-hls-kernel-coding) skill, which covers
@@ -153,8 +159,7 @@ cd $(ABS_PATH)/link; v++ $(XCXX_COMMON_OPTS) --platform $(PLATFORM) \
     -l $(ABS_PATH)/training-libadf.a $(IMAGE_PROCESSING_XO) $(PASS_THROUGH_XO) -o ${PROJECT_NAME}_link.xsa; cd $(ABS_PATH)
 ```
 
-Make sure your kernel `.xo` is built before the link step (add a build rule / prerequisite
-for it), then run the Vitis application build:
+Then run the Vitis application build:
 
 ```bash
 cd Vitis-AI/versal_2ve/reference_design/vek385/rev-b
