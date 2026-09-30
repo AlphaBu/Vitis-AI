@@ -574,7 +574,7 @@ All commands below assume you `cd` into the design directory (so the relative `m
     total (end-to-end)       : 1.157
   Run completed successfully.
   ```
-
+  
   For comparison, the host-copy path (`PL_ZEROCOPY=0`) pays an O(nbytes) memcpy in **both**
   directions (≈ 0.31 ms/frame each here); zero-copy removes essentially all of it.
 
