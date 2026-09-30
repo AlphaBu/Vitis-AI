@@ -113,6 +113,7 @@ Makefile):
 To build:
 
 ```
+cd Vitis-AI/versal_2ve/reference_design/vek385/rev-b/pass_through
 make compile
 ```
 
