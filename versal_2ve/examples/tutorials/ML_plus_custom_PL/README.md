@@ -224,20 +224,21 @@ The example [`ml_vart_plus_pl`](../../cpp_examples/ml_vart_plus_pl) benchmarks t
 **yolox_nano_int8** model together with the **`pass_through` PL kernel**. Example command:
 
 ```bash
-ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
+cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+./ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
 ```
 
 Example output:
 
 ```
-Average inference time over 100 runs (ML only): 1.40 ms
+Average inference time over 100 runs (ML only): 1.04 ms
 Per-stage average (ms/frame, zero-copy ML->PL):
-  ML inference             : 1.403
+  ML inference             : 1.039
   data-transfer-to-PL      : 0.000
-  PL dummy post processing : 0.098
-  data-transfer-from-PL    : 0.011
+  PL dummy post processing : 0.106
+  data-transfer-from-PL    : 0.012
   ------------------------------------
-  total (end-to-end)       : 1.513
+  total (end-to-end)       : 1.157
 Run completed successfully.
 ```
 
@@ -248,24 +249,9 @@ where time goes in the combined ML+PL datapath.
 
 ---
 
-## 8. (Optional) Full‑dataset inference + accuracy
-
-To run ML inference **+ PL inference over an entire dataset** (e.g. COCO), the user
-prepares the input data as the real system would produce it, and post‑processes the PL
-outputs as needed to compute accuracy.
-
-The example provides helper scripts that prepare the ML inference inputs and
-post‑process the PL outputs to compute accuracy end‑to‑end (COCO val2017 mAP for
-YOLOX‑Nano INT8 over `ml_vart_plus_pl` + `pass_through`):
-
-- [`../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md`](../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md)
-
----
-
 ## Related documents
 
 - [../../cpp_examples/ml_vart_plus_pl/README.md](../../cpp_examples/ml_vart_plus_pl/README.md) — example host application: VART‑ML + XRT PL forwarding, build, run, verify.
-- [../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md](../../cpp_examples/ml_vart_plus_pl/FULL_PIPELINE.md) — full COCO val2017 accuracy pipeline (input packing → board run → post‑process → mAP).
 - [../../../reference_design/vek385/rev-b](../../../reference_design/vek385/rev-b) — reference design (HW platform, SW, Vitis app build).
 - [../../../reference_design/vek385/rev-b/pass_through](../../../reference_design/vek385/rev-b/pass_through) — minimal `pass_through` HLS PL kernel (source + build Makefile).
 - [../../../skills/vitis-hls-kernel-coding](../../../skills/vitis-hls-kernel-coding) — skill for writing/optimizing Vitis HLS PL kernels.
