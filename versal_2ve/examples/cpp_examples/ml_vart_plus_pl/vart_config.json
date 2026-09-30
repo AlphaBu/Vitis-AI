@@ -3,7 +3,7 @@
         "model-file": "../../tutorials/yolox_nano_int8_test_with_PL/yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai",
         "runner-options": {
             "log-level": "WARNING",
-            "ai-analyzer-profiling": false
+            "ai-analyzer-profiling": true
         }
     },
     "ifms-config": [
@@ -12,10 +12,5 @@
             "file": "../../tutorials/yolox_nano_int8_test_with_PL/inputSubBO_vaiml_par_0_id_0_0_0_trim.bin"
         }
     ],
-    "ofms-dir": "output_plus_pl",
-    "pl-config": {
-        "xclbin-location": "/run/media/mmcblk0p1/x_plus_ml.xclbin",
-        "kernel-name": "pass_through",
-        "device-index": 1
-    }
+    "ofms-dir": "output"
 }

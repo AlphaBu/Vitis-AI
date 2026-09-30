@@ -508,7 +508,7 @@ Tip: if your build tree is exported to the board over NFS, you can run the binar
 VART-ML loads `libflexmlrt.so` at runtime, which is **not** on the default library path. Export it before running (adjust the path to your image):
 
 ```bash
-export LD_LIBRARY_PATH=/usr/lib/python3.12/site-packages/flexmlrt/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=/usr/lib/python3.12/site-packages/flexmlrt/lib/:/usr/lib/python3.12/site-packages/voe/lib/:/usr/lib/python3.12/site-packages/onnxruntime/capi:/usr/lib/python3.12/site-packages/vart_ml/lib:/usr/lib/python3.12/site-packages/vart_x/lib
 ```
 
 Without this you will see:
@@ -528,13 +528,15 @@ All commands below assume you `cd` into the design directory (so the relative `m
 - **Normal inference** (default HW-tensor mode; forwards outputs through the PL kernel and writes the kernel output):
 
   ```bash
-  ml_vart_plus_pl --app-config vart_config_plus_pl.json
+  cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+  ./ml_vart_plus_pl --app-config vart_config_plus_pl.json
   ```
 
 - **With INFO logging** — shows the PL device open / xclbin load / kernel-ready lines, useful for first-run debugging:
 
   ```bash
-  ml_vart_plus_pl --app-config vart_config_plus_pl.json --log-level 5
+  cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+  ./ml_vart_plus_pl --app-config vart_config_plus_pl.json --log-level 5
   ```
 
   Expected PL lines:
@@ -548,24 +550,28 @@ All commands below assume you `cd` into the design directory (so the relative `m
 - **Dry run** — validate the config and model without any file I/O or PL forwarding (PL init is skipped):
 
   ```bash
-  ml_vart_plus_pl --app-config vart_config_plus_pl.json --dry-run --log-level 5
+  cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+  ./ml_vart_plus_pl --app-config vart_config_plus_pl.json --dry-run --log-level 5
   ```
 
 - **Benchmark** for 100 runs — times the full datapath but saves no outputs. It reports the overall average plus a per-stage breakdown (ms/frame): NPU **ML inference**, **data-transfer-to-PL** (host→PL input staging; `0.000` in zero-copy mode), **PL dummy post processing** (kernel launch + wait), and **data-transfer-from-PL** (PL→host output; a full memcpy in host-copy mode, only a cache sync in zero-copy mode):
 
   ```bash
-  ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
+  cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+  ./ml_vart_plus_pl --app-config vart_config_plus_pl.json --benchmark --runs 100
   ```
 
   Example output (zero-copy, the default — both transfers near zero):
 
   ```
-  Average inference time over 100 runs (ML only): 1.38 ms
+  Average inference time over 100 runs (ML only): 1.04 ms
   Per-stage average (ms/frame, zero-copy ML->PL):
-    ML inference             : 1.378
+    ML inference             : 1.039
     data-transfer-to-PL      : 0.000
-    PL dummy post processing : 0.327
-    data-transfer-from-PL    : 0.011
+    PL dummy post processing : 0.106
+    data-transfer-from-PL    : 0.012
+    ------------------------------------
+    total (end-to-end)       : 1.157
   Run completed successfully.
   ```
 
@@ -575,7 +581,7 @@ All commands below assume you `cd` into the design directory (so the relative `m
 - **Inspect model metadata** (no inference) — prints the CPU + HW tensor view and dumps `<model_basename>_info.json`. Use it to look up the input tensor `name`s needed for `ifms-config`:
 
   ```bash
-  ml_vart_plus_pl --get-model-info yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai
+  ./ml_vart_plus_pl --get-model-info ../../tutorials/yolox_nano_int8_test_with_PL/yolox_nano_onnx_pt_regular_conv_all/yolox_nano_onnx_pt_regular_conv_all.rai
   ```
 
 ### 3.6 Verify correctness
@@ -583,10 +589,11 @@ All commands below assume you `cd` into the design directory (so the relative `m
 Because `pass_through` is an identity kernel, the PL-forwarded outputs must be **byte-for-byte identical** to a plain `ml_vart` run. Run both and compare:
 
 ```bash
+cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
 # Plain inference (no PL) into output/
 ml_vart --app-config vart_config.json
 # PL-forwarded inference into output_plus_pl/
-ml_vart_plus_pl --app-config vart_config_plus_pl.json
+./ml_vart_plus_pl --app-config vart_config_plus_pl.json
 
 # Compare every output tensor
 for f in output/*.bin; do
@@ -677,28 +684,6 @@ output to **separate** banks so reads and writes run concurrently. Add to the Vi
 `pass_through_1.in` reads from the `LPDDR01` bank group while `pass_through_1.out` writes to
 `LPDDR23`, eliminating the shared-bank bottleneck. The host requires no change — each argument's
 bank is discovered at run time via `xrt::kernel::group_id(argno)` when allocating the BOs.
-
-### Measured performance (on board, `--benchmark --runs 100`, zero-copy ML→PL)
-
-With both optimizations in place (512-bit dataflow kernel + split DDR banks):
-
-```text
-Average inference time over 100 runs (ML only): 1.40 ms
-Per-stage average (ms/frame, zero-copy ML->PL):
-  ML inference             : 1.403
-  data-transfer-to-PL      : 0.000
-  PL dummy post processing : 0.098
-  data-transfer-from-PL    : 0.011
-  ------------------------------------
-  total (end-to-end)       : 1.513
-Run completed successfully.
-```
-
-The `pass_through` (PL dummy post processing) stage drops to **0.098 ms/frame** — roughly 3×
-faster than the 128-bit, single-bank baseline (0.327 ms/frame, see [1.5.1](#151-zero-copy-the-mlpl-transfers-dma-buf-default)) — thanks to the wider interface, internal dataflow, and
-contention-free DDR banks. Combined with zero-copy (input transfer = 0.000, output copy-back =
-0.011 ms/frame), the full end-to-end per-frame latency is **1.513 ms**, i.e. the NPU inference
-plus only ~0.11 ms of PL forward overhead.
 
 ---
 
