@@ -210,6 +210,19 @@ Write the host C++ application that drives the pipeline:
 Compile the host code with the installed **SDK** (cross toolchain), producing an AArch64
 ELF for the board.
 
+Source the Vitis AI SDK for Versal AI Edge Series Gen 2:
+
+```bash
+source /path/to/sdk/environment-setup-cortexa72-cortexa53-amd-linux
+```
+
+Build:
+
+```bash
+cd Vitis-AI/versal_2ve/examples/cpp_examples/ml_vart_plus_pl
+make all
+```
+
 **Example host application** — a complete, documented reference that runs a VART‑ML model
 and forwards each output tensor through the `pass_through` PL kernel via the native XRT
 C++ API:
